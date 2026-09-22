@@ -14,14 +14,50 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
-    --ink:#1b1d1f;
+    --ink:#211f1a;
     --paper:#f6f4ee;
-    --line:#d8d3c4;
-    --accent:#2f5d50;
-    --accent-soft:#e4ece8;
+    --paper-dim:#ece7d9;
+    --rule:#d8d3c4;
+    --pine:#2f5d50;
+    --pine-deep:#1f3f36;
+    --pine-soft:#e4ece8;
     --amber:#b8894a;
+    --muted:#6b6558;
+    --surface:#fffefb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#ece7dd;
+      --paper:#17181a;
+      --paper-dim:#232421;
+      --rule:#38372f;
+      --pine:#5aab92;
+      --pine-deep:#7cc4ab;
+      --pine-soft:#1f2b27;
+      --amber:#d1a668;
+      --muted:#a39c8c;
+      --surface:#1f201d;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#ece7dd;
+    --paper:#17181a;
+    --paper-dim:#232421;
+    --rule:#38372f;
+    --pine:#5aab92;
+    --pine-deep:#7cc4ab;
+    --pine-soft:#1f2b27;
+    --amber:#d1a668;
+    --muted:#a39c8c;
+    --surface:#1f201d;
+    color-scheme: dark;
   }
   *{box-sizing:border-box;}
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;}
+  }
   body{
     margin:0;
     font-family:"Iowan Old Style","Georgia",serif;
@@ -32,24 +68,44 @@
     flex-direction:column;
     align-items:center;
   }
+  a, button, select, input{ font-family: inherit; }
+  :focus-visible{ outline: 2px solid var(--pine); outline-offset: 2px; }
+
   header{
     width:100%;
-    padding:28px 20px 10px;
-    text-align:center;
-    border-bottom:1px solid var(--line);
-    background:linear-gradient(180deg,#fbfaf5,var(--paper));
+    padding:32px 20px 22px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:10px;
+    border-bottom:1px solid var(--rule);
   }
-  h1{font-size:1.6rem;letter-spacing:0.02em;margin:0 0 4px;font-weight:600;}
+  .mark{ display:flex; align-items:flex-end; gap:4px; height:28px; }
+  .mark span{
+    width:4px; border-radius:2px; background:var(--pine);
+    height:8px; transition: background .3s;
+  }
+  body.is-playing .mark span{ animation: bounce 1.1s ease-in-out infinite; }
+  body.is-playing .mark span:nth-child(1){ animation-delay:-1.0s; }
+  body.is-playing .mark span:nth-child(2){ animation-delay:-0.7s; }
+  body.is-playing .mark span:nth-child(3){ animation-delay:-0.4s; }
+  body.is-playing .mark span:nth-child(4){ animation-delay:-0.85s; }
+  body.is-playing .mark span:nth-child(5){ animation-delay:-0.2s; }
+  @keyframes bounce{
+    0%,100%{ height:8px; }
+    50%{ height:26px; }
+  }
+  h1{font-size:1.7rem;letter-spacing:0.01em;margin:0;font-weight:600;}
   .tagline{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    font-size:0.85rem;color:#6b6558;letter-spacing:0.04em;text-transform:uppercase;
+    font-size:0.9rem;color:var(--ink);opacity:0.62;max-width:34ch;text-align:center;line-height:1.4;
   }
   main{width:100%;max-width:640px;padding:24px 20px 80px;flex:1;}
 
   #resumeBanner{
     display:none;
-    background:var(--accent-soft);
-    border:1px solid var(--accent);
+    background:var(--pine-soft);
+    border:1px solid var(--pine);
     border-radius:6px;
     padding:14px 16px;
     margin-bottom:18px;
@@ -65,27 +121,27 @@
   #resumeBanner button{
     border:none;border-radius:18px;padding:7px 14px;font-size:0.8rem;cursor:pointer;
   }
-  #resumeYes{background:var(--accent);color:#fff;}
-  #resumeNo{background:transparent;color:#6b6558;}
+  #resumeYes{background:var(--pine);color:#fff;}
+  #resumeNo{background:transparent;color:var(--muted);}
 
   #dropzone{
-    border:1.5px dashed var(--line);
+    border:1.5px dashed var(--rule);
     border-radius:4px;
     padding:36px 20px;
     text-align:center;
-    background:#fffefb;
+    background:var(--surface);
     cursor:pointer;
     transition:border-color .2s,background .2s;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   }
-  #dropzone.drag{border-color:var(--accent);background:var(--accent-soft);}
-  #dropzone p{margin:6px 0;color:#514c40;}
-  #dropzone strong{color:var(--accent);}
+  #dropzone.drag{border-color:var(--pine);background:var(--pine-soft);}
+  #dropzone p{margin:6px 0;color:var(--ink);}
+  #dropzone strong{color:var(--pine);}
   #fileInput{display:none;}
 
   #status{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    font-size:0.85rem;color:#847d6c;text-align:center;margin-top:10px;min-height:1.2em;
+    font-size:0.85rem;color:var(--muted);text-align:center;margin-top:10px;min-height:1.2em;
   }
 
   #reader{display:none;margin-top:28px;}
@@ -98,7 +154,7 @@
   }
   .doc-title span.pages{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    font-size:0.75rem;color:#8a8471;font-weight:400;white-space:nowrap;
+    font-size:0.75rem;color:var(--muted);font-weight:400;white-space:nowrap;
   }
 
   .chapter-row{
@@ -108,68 +164,71 @@
   }
   .chapter-row select{
     flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;
-    border-radius:4px;border:1px solid var(--line);background:#fffefb;
+    border-radius:4px;border:1px solid var(--rule);background:var(--surface);
   }
   .chapter-row button{
-    background:transparent;border:1px solid var(--line);color:var(--ink);
+    background:transparent;border:1px solid var(--rule);color:var(--ink);
     border-radius:20px;padding:6px 12px;font-size:0.78rem;cursor:pointer;white-space:nowrap;
   }
-  .chapter-row button:hover{border-color:var(--accent);color:var(--accent);}
+  .chapter-row button:hover{border-color:var(--pine);color:var(--pine);}
 
   #textview{
-    background:#fffefb;border:1px solid var(--line);border-radius:4px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:4px;
     padding:22px;max-height:280px;overflow-y:auto;line-height:1.8;font-size:1rem;
   }
   #textview mark{background:var(--amber);color:#fff;border-radius:2px;padding:0 1px;}
-  #textview .said{color:#b3ad9c;}
+  #textview .said{color:var(--muted);}
 
   .controls{
     margin-top:20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
     justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   }
   button.transport{
-    width:52px;height:52px;border-radius:50%;border:none;background:var(--accent);
+    width:52px;height:52px;border-radius:50%;border:none;background:var(--pine);
     color:#fff;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;
     justify-content:center;transition:transform .1s,background .2s;
   }
-  button.transport:hover{background:#254c41;}
+  button.transport:hover{background:var(--pine-deep);}
   button.transport:active{transform:scale(0.94);}
   button.seek{
-    width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
-    background:#fffefb;color:var(--ink);font-size:0.72rem;cursor:pointer;
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--rule);
+    background:var(--surface);color:var(--ink);font-size:0.72rem;cursor:pointer;
     display:flex;align-items:center;justify-content:center;line-height:1.1;text-align:center;
   }
-  button.seek:hover{border-color:var(--accent);color:var(--accent);}
+  button.seek:hover{border-color:var(--pine);color:var(--pine);}
   button.secondary{
-    background:transparent;border:1px solid var(--line);color:var(--ink);
+    background:transparent;border:1px solid var(--rule);color:var(--ink);
     border-radius:20px;padding:8px 16px;font-size:0.85rem;cursor:pointer;
   }
-  button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+  button.secondary:hover{border-color:var(--pine);color:var(--pine);}
   button:disabled{opacity:0.35;cursor:default;}
 
   .row{
     width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;
     margin-top:14px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    font-size:0.8rem;color:#6b6558;flex-wrap:wrap;
+    font-size:0.8rem;color:var(--muted);flex-wrap:wrap;
   }
-  select,input[type=range]{accent-color:var(--accent);}
+  select,input[type=range]{accent-color:var(--pine);}
   select{
     font-family:inherit;font-size:0.8rem;padding:5px 8px;border-radius:4px;
-    border:1px solid var(--line);background:#fffefb;max-width:170px;
+    border:1px solid var(--rule);background:var(--surface);max-width:170px;
   }
   .rate-label{white-space:nowrap;display:flex;align-items:center;gap:6px;}
 
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    font-size:0.7rem;color:#a29c8c;padding:16px;text-align:center;
+    font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
   }
 </style>
 </head>
 <body>
 
 <header>
+  <div class="mark" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
   <h1>Readloud</h1>
-  <div class="tagline">Your PDFs, spoken · runs entirely in this browser · free</div>
+  <div class="tagline">Drop in a PDF and it reads itself to you — free, private, and it runs right here in your browser.</div>
 </header>
 
 <main>
@@ -390,7 +449,7 @@ function renderChapterMenu(){
   chapterSelect.innerHTML='<option value="">Jump to chapter…</option>';
   chapters.forEach((c,i)=>{
     const opt=document.createElement('option');
-    opt.value=i; opt.textContent=`${c.title}  ·  p${c.page}`;
+    opt.value=i; opt.textContent=`${c.title} (page ${c.page})`;
     chapterSelect.appendChild(opt);
   });
 }
@@ -477,6 +536,7 @@ function stopSpeaking(){
   speechSynthesis.cancel();
   isPlaying=false;
   playBtn.textContent='▶';
+  document.body.classList.remove('is-playing');
 }
 
 function highlightSentence(idx){
@@ -504,6 +564,7 @@ function speakFromSentence(idx){
   speechSynthesis.speak(u);
   isPlaying=true;
   playBtn.textContent='❚❚';
+  document.body.classList.add('is-playing');
 }
 
 async function goNextPage(){
