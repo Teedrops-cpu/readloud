@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Readloud — your PDF, read aloud</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#2f5d50">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Readloud">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" href="./icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --ink:#1b1d1f;
+    --paper:#f6f4ee;
+    --line:#d8d3c4;
+    --accent:#2f5d50;
+    --accent-soft:#e4ece8;
+    --amber:#b8894a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Iowan Old Style","Georgia",serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+  header{
+    width:100%;
+    padding:28px 20px 10px;
+    text-align:center;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#fbfaf5,var(--paper));
+  }
+  h1{font-size:1.6rem;letter-spacing:0.02em;margin:0 0 4px;font-weight:600;}
+  .tagline{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.85rem;color:#6b6558;letter-spacing:0.04em;text-transform:uppercase;
+  }
+  main{width:100%;max-width:640px;padding:24px 20px 80px;flex:1;}
+
+  #resumeBanner{
+    display:none;
+    background:var(--accent-soft);
+    border:1px solid var(--accent);
+    border-radius:6px;
+    padding:14px 16px;
+    margin-bottom:18px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.85rem;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  #resumeBanner.show{display:flex;}
+  #resumeBanner button{
+    border:none;border-radius:18px;padding:7px 14px;font-size:0.8rem;cursor:pointer;
+  }
+  #resumeYes{background:var(--accent);color:#fff;}
+  #resumeNo{background:transparent;color:#6b6558;}
+
+  #dropzone{
+    border:1.5px dashed var(--line);
+    border-radius:4px;
+    padding:36px 20px;
+    text-align:center;
+    background:#fffefb;
+    cursor:pointer;
+    transition:border-color .2s,background .2s;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  #dropzone.drag{border-color:var(--accent);background:var(--accent-soft);}
+  #dropzone p{margin:6px 0;color:#514c40;}
+  #dropzone strong{color:var(--accent);}
+  #fileInput{display:none;}
+
+  #status{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.85rem;color:#847d6c;text-align:center;margin-top:10px;min-height:1.2em;
+  }
+
+  #reader{display:none;margin-top:28px;}
+  #reader.active{display:block;}
+
+  .doc-title{
+    font-size:1.05rem;font-weight:600;border-bottom:2px solid var(--ink);
+    padding-bottom:8px;margin-bottom:14px;display:flex;justify-content:space-between;
+    align-items:baseline;gap:10px;flex-wrap:wrap;
+  }
+  .doc-title span.pages{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.75rem;color:#8a8471;font-weight:400;white-space:nowrap;
+  }
+
+  .chapter-row{
+    display:flex;gap:8px;align-items:center;margin-bottom:16px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.8rem;flex-wrap:wrap;
+  }
+  .chapter-row select{
+    flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;
+    border-radius:4px;border:1px solid var(--line);background:#fffefb;
+  }
+  .chapter-row button{
+    background:transparent;border:1px solid var(--line);color:var(--ink);
+    border-radius:20px;padding:6px 12px;font-size:0.78rem;cursor:pointer;white-space:nowrap;
+  }
+  .chapter-row button:hover{border-color:var(--accent);color:var(--accent);}
+
+  #textview{
+    background:#fffefb;border:1px solid var(--line);border-radius:4px;
+    padding:22px;max-height:280px;overflow-y:auto;line-height:1.8;font-size:1rem;
+  }
+  #textview mark{background:var(--amber);color:#fff;border-radius:2px;padding:0 1px;}
+  #textview .said{color:#b3ad9c;}
+
+  .controls{
+    margin-top:20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  button.transport{
+    width:52px;height:52px;border-radius:50%;border:none;background:var(--accent);
+    color:#fff;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;
+    justify-content:center;transition:transform .1s,background .2s;
+  }
+  button.transport:hover{background:#254c41;}
+  button.transport:active{transform:scale(0.94);}
+  button.seek{
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
+    background:#fffefb;color:var(--ink);font-size:0.72rem;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;line-height:1.1;text-align:center;
+  }
+  button.seek:hover{border-color:var(--accent);color:var(--accent);}
+  button.secondary{
+    background:transparent;border:1px solid var(--line);color:var(--ink);
+    border-radius:20px;padding:8px 16px;font-size:0.85rem;cursor:pointer;
+  }
+  button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+  button:disabled{opacity:0.35;cursor:default;}
+
+  .row{
+    width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;
+    margin-top:14px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.8rem;color:#6b6558;flex-wrap:wrap;
+  }
+  select,input[type=range]{accent-color:var(--accent);}
+  select{
+    font-family:inherit;font-size:0.8rem;padding:5px 8px;border-radius:4px;
+    border:1px solid var(--line);background:#fffefb;max-width:170px;
+  }
+  .rate-label{white-space:nowrap;display:flex;align-items:center;gap:6px;}
+
+  footer{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.7rem;color:#a29c8c;padding:16px;text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Readloud</h1>
+  <div class="tagline">Your PDFs, spoken · runs entirely in this browser · free</div>
+</header>
+
+<main>
+  <div id="resumeBanner">
+    <span id="resumeText"></span>
+    <span>
+      <button id="resumeYes">Resume</button>
+      <button id="resumeNo">Start fresh</button>
+    </span>
+  </div>
+
+  <div id="dropzone">
+    <p><strong>Drop a PDF here</strong> or tap to choose one</p>
+    <p style="font-size:0.78rem;">Nothing is uploaded anywhere — it's read locally on your device.</p>
+    <input type="file" id="fileInput" accept="application/pdf">
+  </div>
+  <div id="status"></div>
+
+  <div id="reader">
+    <div class="doc-title">
+      <span id="docName">Untitled</span>
+      <span class="pages" id="pageInfo"></span>
+    </div>
+
+    <div class="chapter-row">
+      <select id="chapterSelect"><option value="">Jump to chapter…</option></select>
+      <button id="markChapterBtn">+ Mark this page</button>
+    </div>
+
+    <div id="textview"></div>
+
+    <div class="controls">
+      <button class="seek" id="back10" title="Back 10s">◀◀<br>10s</button>
+      <button class="seek" id="back5" title="Back 5s">◀<br>5s</button>
+      <button class="transport" id="playBtn" title="Play">▶</button>
+      <button class="seek" id="fwd5" title="Forward 5s">▶<br>5s</button>
+      <button class="seek" id="fwd10" title="Forward 10s">▶▶<br>10s</button>
+    </div>
+    <div class="controls">
+      <button class="secondary" id="prevBtn">⟵ Prev page</button>
+      <button class="secondary" id="nextBtn">Next page ⟶</button>
+    </div>
+
+    <div class="row">
+      <label class="rate-label">Speed
+        <input type="range" id="rateSlider" min="0.5" max="2" step="0.1" value="1">
+        <span id="rateVal">1.0×</span>
+      </label>
+      <select id="voiceSelect"></select>
+    </div>
+
+    <div class="row">
+      <label class="rate-label">Sleep timer
+        <select id="sleepSelect">
+          <option value="0">Off</option>
+          <option value="5">5 min</option>
+          <option value="15">15 min</option>
+          <option value="30">30 min</option>
+          <option value="45">45 min</option>
+          <option value="60">60 min</option>
+        </select>
+      </label>
+      <span id="sleepCountdown"></span>
+    </div>
+  </div>
+</main>
+
+<footer>Built with pdf.js + your browser's speech engine. Works offline once loaded.</footer>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+// ---------- element refs ----------
+const dropzone=document.getElementById('dropzone'), fileInput=document.getElementById('fileInput');
+const statusEl=document.getElementById('status'), reader=document.getElementById('reader');
+const textview=document.getElementById('textview'), docName=document.getElementById('docName');
+const pageInfo=document.getElementById('pageInfo'), playBtn=document.getElementById('playBtn');
+const prevBtn=document.getElementById('prevBtn'), nextBtn=document.getElementById('nextBtn');
+const back10=document.getElementById('back10'), back5=document.getElementById('back5');
+const fwd5=document.getElementById('fwd5'), fwd10=document.getElementById('fwd10');
+const rateSlider=document.getElementById('rateSlider'), rateVal=document.getElementById('rateVal');
+const voiceSelect=document.getElementById('voiceSelect');
+const chapterSelect=document.getElementById('chapterSelect'), markChapterBtn=document.getElementById('markChapterBtn');
+const sleepSelect=document.getElementById('sleepSelect'), sleepCountdown=document.getElementById('sleepCountdown');
+const resumeBanner=document.getElementById('resumeBanner'), resumeText=document.getElementById('resumeText');
+const resumeYes=document.getElementById('resumeYes'), resumeNo=document.getElementById('resumeNo');
+
+// ---------- state ----------
+let pdfDoc=null, currentPage=1, totalPages=0;
+let sentences=[], sentenceDurations=[], sentenceCum=[]; // per current page
+let currentSentenceIdx=0;
+let isPlaying=false, voices=[];
+let fileMeta=null; // {name,size}
+let chapters=[]; // {title,page,source}
+let sleepTimeoutId=null, sleepIntervalId=null, sleepEndsAt=null;
+const WPS_BASE=2.3; // words per second baseline for duration estimate
+
+// ---------- IndexedDB (tiny wrapper) ----------
+const DB_NAME='readloudDB', STORE='session';
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open(DB_NAME,1);
+    req.onupgradeneeded=()=>req.result.createObjectStore(STORE);
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error);
+  });
+}
+async function idbSet(key,val){
+  const db=await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx=db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).put(val,key);
+    tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+  });
+}
+async function idbGet(key){
+  const db=await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx=db.transaction(STORE,'readonly');
+    const r=tx.objectStore(STORE).get(key);
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+}
+
+async function saveSession(){
+  if(!fileMeta) return;
+  await idbSet('current',{
+    name:fileMeta.name, size:fileMeta.size, buf:fileMeta.buf,
+    page:currentPage, chapters, savedAt:Date.now()
+  });
+}
+
+// ---------- voices ----------
+function loadVoices(){
+  voices=speechSynthesis.getVoices();
+  voiceSelect.innerHTML='';
+  voices.forEach((v,i)=>{
+    const opt=document.createElement('option');
+    opt.value=i; opt.textContent=`${v.name} (${v.lang})`;
+    voiceSelect.appendChild(opt);
+  });
+  const enIdx=voices.findIndex(v=>v.lang.startsWith('en'));
+  if(enIdx>=0) voiceSelect.value=enIdx;
+}
+speechSynthesis.onvoiceschanged=loadVoices;
+loadVoices();
+
+// ---------- resume check on load ----------
+(async ()=>{
+  try{
+    const saved=await idbGet('current');
+    if(saved && saved.buf){
+      resumeText.textContent=`Continue "${saved.name}" — you were on page ${saved.page}?`;
+      resumeBanner.classList.add('show');
+      resumeYes.onclick=async ()=>{
+        resumeBanner.classList.remove('show');
+        await openFromBuffer(saved.buf, saved.name, saved.size, saved.chapters||[], saved.page||1);
+      };
+      resumeNo.onclick=()=>resumeBanner.classList.remove('show');
+    }
+  }catch(e){ /* IndexedDB unavailable — resume simply won't be offered */ }
+})();
+
+// ---------- file handling ----------
+dropzone.addEventListener('click',()=>fileInput.click());
+dropzone.addEventListener('dragover',e=>{e.preventDefault();dropzone.classList.add('drag');});
+dropzone.addEventListener('dragleave',()=>dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop',e=>{
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change',e=>{ if(e.target.files.length) handleFile(e.target.files[0]); });
+
+async function handleFile(file){
+  if(file.type!=='application/pdf'){ statusEl.textContent='Please choose a PDF file.'; return; }
+  statusEl.textContent='Loading "'+file.name+'"…';
+  stopSpeaking();
+  const buf=await file.arrayBuffer();
+  await openFromBuffer(buf, file.name, file.size, [], 1);
+}
+
+async function openFromBuffer(buf, name, size, existingChapters, startPage){
+  clearSleepTimer();
+  sleepSelect.value='0';
+  fileMeta={name,size,buf};
+  pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+  totalPages=pdfDoc.numPages;
+  currentPage=Math.min(startPage||1, totalPages);
+  docName.textContent=name.replace(/\.pdf$/i,'');
+  reader.classList.add('active');
+  statusEl.textContent='';
+
+  const outlineChapters=await resolveOutline(await pdfDoc.getOutline()||[]);
+  const manual=(existingChapters||[]).filter(c=>c.source==='manual');
+  chapters=[...outlineChapters, ...manual].sort((a,b)=>a.page-b.page);
+  renderChapterMenu();
+
+  await renderPage(currentPage);
+  await saveSession();
+}
+
+async function resolveOutline(items, acc=[]){
+  for(const item of items){
+    try{
+      let dest=item.dest;
+      if(typeof dest==='string') dest=await pdfDoc.getDestination(dest);
+      if(dest && dest[0]){
+        const pageIndex=await pdfDoc.getPageIndex(dest[0]);
+        acc.push({title:item.title, page:pageIndex+1, source:'outline'});
+      }
+    }catch(e){}
+    if(item.items && item.items.length) await resolveOutline(item.items, acc);
+  }
+  return acc;
+}
+
+function renderChapterMenu(){
+  chapterSelect.innerHTML='<option value="">Jump to chapter…</option>';
+  chapters.forEach((c,i)=>{
+    const opt=document.createElement('option');
+    opt.value=i; opt.textContent=`${c.title}  ·  p${c.page}`;
+    chapterSelect.appendChild(opt);
+  });
+}
+chapterSelect.addEventListener('change', async ()=>{
+  const idx=chapterSelect.value;
+  if(idx==='') return;
+  const target=chapters[idx].page;
+  stopSpeaking();
+  currentPage=target;
+  await renderPage(currentPage);
+  await saveSession();
+  chapterSelect.value='';
+});
+markChapterBtn.addEventListener('click', async ()=>{
+  const title=prompt('Name this chapter (page '+currentPage+'):', 'Chapter at p.'+currentPage);
+  if(!title) return;
+  chapters=chapters.filter(c=>!(c.source==='manual' && c.page===currentPage));
+  chapters.push({title, page:currentPage, source:'manual'});
+  chapters.sort((a,b)=>a.page-b.page);
+  renderChapterMenu();
+  await saveSession();
+});
+
+// ---------- page rendering + chunking ----------
+// Chunk primarily on sentence/clause punctuation so the voice keeps its
+// natural pauses and intonation at periods, commas, semicolons — important
+// for listening without looking at the screen. Only fall back to a hard
+// word-count split for unusually long run-on sentences, so seek buttons
+// stay responsive even then.
+const MAX_CHUNK_WORDS=18; // ~7-8s cap at the baseline reading rate
+function chunkForSeeking(text){
+  const rawSentences=text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+  const chunks=[];
+  rawSentences.forEach(raw=>{
+    const sentence=raw.trim();
+    if(!sentence) return;
+    const words=sentence.split(/\s+/).filter(Boolean);
+    if(words.length<=MAX_CHUNK_WORDS){
+      chunks.push(sentence);
+      return;
+    }
+    // long sentence: split at commas/semicolons/colons where possible
+    const clauses=sentence.split(/(?<=[,;:])\s+/);
+    let buffer=[], bufferWords=0;
+    clauses.forEach(part=>{
+      const pw=part.split(/\s+/).filter(Boolean).length;
+      if(bufferWords+pw>MAX_CHUNK_WORDS && buffer.length){
+        chunks.push(buffer.join(' '));
+        buffer=[part]; bufferWords=pw;
+      } else {
+        buffer.push(part); bufferWords+=pw;
+      }
+    });
+    if(buffer.length) chunks.push(buffer.join(' '));
+  });
+  return chunks.length ? chunks : [text];
+}
+
+async function renderPage(num){
+  const page=await pdfDoc.getPage(num);
+  const content=await page.getTextContent();
+  const text=content.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
+
+  sentences=chunkForSeeking(text);
+  if(sentences.length===0) sentences=[''];
+
+  const rate=parseFloat(rateSlider.value);
+  sentenceDurations=sentences.map(s=>{
+    const words=s.split(/\s+/).filter(Boolean).length;
+    return Math.max(words/(WPS_BASE*rate), 0.3);
+  });
+  sentenceCum=[]; let acc=0;
+  sentenceDurations.forEach(d=>{ sentenceCum.push(acc); acc+=d; });
+
+  textview.innerHTML=sentences.map((s,i)=>`<span class="sent" id="s${i}">${s.replace(/</g,'&lt;')}</span>`).join(' ');
+  pageInfo.textContent=`Page ${num} of ${totalPages}`;
+  prevBtn.disabled=num<=1; nextBtn.disabled=num>=totalPages;
+  textview.scrollTop=0;
+  currentSentenceIdx=0;
+}
+
+// ---------- speech playback ----------
+function stopSpeaking(){
+  speechSynthesis.cancel();
+  isPlaying=false;
+  playBtn.textContent='▶';
+}
+
+function highlightSentence(idx){
+  document.querySelectorAll('#textview .sent').forEach((el,i)=>{
+    el.classList.toggle('said', i<idx);
+    if(i===idx){ el.innerHTML=`<mark>${sentences[i].replace(/</g,'&lt;')}</mark>`; el.scrollIntoView({block:'center',behavior:'smooth'}); }
+    else if(i!==idx){ el.innerHTML=sentences[i].replace(/</g,'&lt;'); }
+  });
+}
+
+function speakFromSentence(idx){
+  stopSpeaking();
+  if(idx<0) idx=0;
+  if(idx>=sentences.length){ goNextPage(); return; }
+  currentSentenceIdx=idx;
+  highlightSentence(idx);
+  const u=new SpeechSynthesisUtterance(sentences[idx]);
+  const vIdx=voiceSelect.value;
+  if(voices[vIdx]) u.voice=voices[vIdx];
+  u.rate=parseFloat(rateSlider.value);
+  u.onend=()=>{
+    if(!isPlaying) return; // was paused/stopped
+    speakFromSentence(idx+1);
+  };
+  speechSynthesis.speak(u);
+  isPlaying=true;
+  playBtn.textContent='❚❚';
+}
+
+async function goNextPage(){
+  if(currentPage<totalPages){
+    currentPage++;
+    await renderPage(currentPage);
+    await saveSession();
+    speakFromSentence(0);
+  } else {
+    stopSpeaking();
+  }
+}
+
+playBtn.addEventListener('click',()=>{
+  if(isPlaying){
+    stopSpeaking();
+  } else {
+    speakFromSentence(currentSentenceIdx);
+  }
+});
+
+restartCurrentPage=()=>speakFromSentence(0);
+
+prevBtn.addEventListener('click', async ()=>{
+  if(currentPage>1){ currentPage--; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
+});
+nextBtn.addEventListener('click', async ()=>{
+  if(currentPage<totalPages){ currentPage++; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
+});
+
+// ---------- seek (sentence-granularity approximation of seconds) ----------
+function seekBy(deltaSeconds){
+  if(sentences.length===0) return;
+  const currentTime=(sentenceCum[currentSentenceIdx]||0);
+  const targetTime=Math.max(0, currentTime+deltaSeconds);
+  let targetIdx=sentenceCum.findIndex(t=>t>targetTime);
+  if(targetIdx===-1) targetIdx=sentences.length-1; else targetIdx=Math.max(0,targetIdx-1);
+  const wasPlaying=isPlaying;
+  if(wasPlaying) speakFromSentence(targetIdx);
+  else { currentSentenceIdx=targetIdx; highlightSentence(targetIdx); }
+}
+// ---------- sleep timer ----------
+function clearSleepTimer(){
+  if(sleepTimeoutId){ clearTimeout(sleepTimeoutId); sleepTimeoutId=null; }
+  if(sleepIntervalId){ clearInterval(sleepIntervalId); sleepIntervalId=null; }
+  sleepEndsAt=null;
+  sleepCountdown.textContent='';
+}
+function setSleepTimer(minutes){
+  clearSleepTimer();
+  if(!minutes) return;
+  sleepEndsAt=Date.now()+minutes*60*1000;
+  sleepTimeoutId=setTimeout(()=>{
+    stopSpeaking();
+    clearSleepTimer();
+    sleepSelect.value='0';
+    statusEl.textContent='Sleep timer ended playback.';
+  }, minutes*60*1000);
+  sleepIntervalId=setInterval(()=>{
+    if(!sleepEndsAt) return;
+    const remaining=Math.max(0, Math.round((sleepEndsAt-Date.now())/1000));
+    const m=String(Math.floor(remaining/60)).padStart(2,'0');
+    const s=String(remaining%60).padStart(2,'0');
+    sleepCountdown.textContent=`stops in ${m}:${s}`;
+  }, 1000);
+}
+sleepSelect.addEventListener('change',()=>setSleepTimer(parseInt(sleepSelect.value,10)));
+
+// ---------- PWA: register the service worker for offline install ----------
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js').catch(()=>{
+      // fine to fail quietly here (e.g. running from file:// during local testing) —
+      // the reader itself still works, just without offline/install support.
+    });
+  });
+}
+
+back10.addEventListener('click',()=>seekBy(-10));
+back5.addEventListener('click',()=>seekBy(-5));
+fwd5.addEventListener('click',()=>seekBy(5));
+fwd10.addEventListener('click',()=>seekBy(10));
+
+// ---------- speed ----------
+rateSlider.addEventListener('input',()=>{
+  rateVal.textContent=parseFloat(rateSlider.value).toFixed(1)+'×';
+  // recompute duration estimates at new rate, keep same sentence position
+  const words=sentences.map(s=>s.split(/\s+/).filter(Boolean).length);
+  const rate=parseFloat(rateSlider.value);
+  sentenceDurations=words.map(w=>Math.max(w/(WPS_BASE*rate),0.3));
+  sentenceCum=[]; let acc=0; sentenceDurations.forEach(d=>{sentenceCum.push(acc); acc+=d;});
+  if(isPlaying) speakFromSentence(currentSentenceIdx);
+});
+</script>
+</body>
+</html>

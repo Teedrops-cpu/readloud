@@ -1,0 +1,12 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Windows "Mark of the Web" companion files created when extracting
+# a downloaded zip — harmless, but never belong in the repo
+*:Zone.Identifier
+
+# Future tooling, if this ever grows a build step
+node_modules/
+.wrangler/
+*.log
