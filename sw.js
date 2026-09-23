@@ -1,5 +1,7 @@
-// Bump this on every deploy so old caches get cleared out automatically.
-const CACHE_NAME = 'readloud-shell-v1';
+// Bump this only if you ever need to force a full cache wipe (e.g. after
+// changing which files are precached). Normal content updates don't need
+// a bump anymore — see the network-first strategy below.
+const CACHE_NAME = 'readloud-shell-v2';
 
 const APP_SHELL = [
   './',
@@ -28,13 +30,29 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache-first for the app shell (fast + works offline), falling back to
-// the network — and updating the cache in the background — for anything
-// not precached. This does NOT cache PDFs the user opens; those stay local
-// to the session/IndexedDB, never sent anywhere.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const isNavigation = event.request.mode === 'navigate' ||
+    event.request.url.endsWith('/index.html') ||
+    event.request.url.endsWith('/');
 
+  if (isNavigation) {
+    // App shell HTML: always try the network first, so a new deploy is
+    // visible on the very next load. Only fall back to cache when offline.
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        if (response && response.status === 200) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Everything else (icons, pdf.js, manifest): cache-first, since these
+  // rarely change and this is what makes the app load instantly/offline.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const network = fetch(event.request).then((response) => {
@@ -44,7 +62,6 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       }).catch(() => cached);
-
       return cached || network;
     })
   );
