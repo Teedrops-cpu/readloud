@@ -6,10 +6,10 @@ compatibility_date = "2026-09-01"
 # Update this to match wherever Readloud is actually hosted.
 [vars]
 ALLOWED_ORIGINS = "https://readloud.tayooni2016.workers.dev,http://localhost:8000"
-DAILY_CHAR_LIMIT = "2000"
+DAILY_CHAR_LIMIT = "150000"
 
 # Created via: wrangler kv namespace create TTS_USAGE
 # Then paste the id it gives you below.
 [[kv_namespaces]]
 binding = "TTS_USAGE"
-id = "1674038b78e548e7a202f66fb1c0d6c8"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

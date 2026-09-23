@@ -350,10 +350,14 @@ const WPS_BASE=2.3; // words per second baseline for duration estimate
 
 // ---- Premium (paid) voice config ----
 // Fill these in after deploying the Worker in /worker (see its README).
-const PREMIUM_TTS_ENDPOINT='https://readloud-tts-proxy.tayooni2016.workers.dev';
-const APP_SHARED_KEY='#H~?JV<dujhe;g5bh$%236o';
+const PREMIUM_TTS_ENDPOINT='https://readloud-tts-proxy.YOUR-SUBDOMAIN.workers.dev';
+const APP_SHARED_KEY='REPLACE_WITH_YOUR_APP_SHARED_KEY';
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
+// Caches generated audio per page+segment+voice so switching back to a
+// voice you already generated on this page replays it for free instead
+// of re-billing OpenAI. Cleared whenever the page changes.
+let premiumCache=new Map(), loadedAudioVoice=null;
 
 // ---------- IndexedDB (tiny wrapper) ----------
 const DB_NAME='readloudDB', STORE='session';
@@ -442,6 +446,7 @@ async function handleFile(file){
 async function openFromBuffer(buf, name, size, existingChapters, startPage){
   clearSleepTimer();
   sleepSelect.value='0';
+  resetPremiumForPage(); // new document — old cached audio is meaningless now
   fileMeta={name,size,buf};
   pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
   totalPages=pdfDoc.numPages;
@@ -508,7 +513,7 @@ markChapterBtn.addEventListener('click', async ()=>{
 // for listening without looking at the screen. Only fall back to a hard
 // word-count split for unusually long run-on sentences, so seek buttons
 // stay responsive even then.
-const MAX_CHUNK_WORDS=18; // ~7-8s cap at the baseline reading rate
+const MAX_CHUNK_WORDS=12; // tighter cap = more frequent highlight updates; ~4-5s per chunk
 function chunkForSeeking(text){
   const rawSentences=text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
   const chunks=[];
@@ -540,7 +545,6 @@ function chunkForSeeking(text){
 async function renderPage(num){
   premiumSegments=[]; currentSegmentIdx=0;
   premiumAudio.pause();
-  if(premiumObjectUrl){ URL.revokeObjectURL(premiumObjectUrl); premiumObjectUrl=null; }
 
   const page=await pdfDoc.getPage(num);
   const content=await page.getTextContent();
@@ -648,18 +652,29 @@ async function playPremiumFromChunk(idx){
   highlightSentence(idx);
 
   const seg=premiumSegments[currentSegmentIdx];
+  const voice=premiumVoiceSelect.value;
+  const cacheKey=`${currentPage}:${currentSegmentIdx}:${voice}`;
   isPlaying=true;
   playBtn.textContent='⋯';
   document.body.classList.add('is-playing');
-  statusEl.textContent='Loading premium audio…';
+
   try{
-    const blob=await fetchPremiumAudio(seg.text);
-    if(!isPlaying) return; // stopped while loading
-    if(premiumObjectUrl) URL.revokeObjectURL(premiumObjectUrl);
-    premiumObjectUrl=URL.createObjectURL(blob);
-    premiumAudio.src=premiumObjectUrl;
+    let objectUrl=premiumCache.get(cacheKey);
+    if(objectUrl){
+      // Already generated this exact page+segment+voice before — free replay.
+      statusEl.textContent='';
+    } else {
+      statusEl.textContent='Loading premium audio…';
+      const blob=await fetchPremiumAudio(seg.text);
+      if(!isPlaying) return; // stopped while loading
+      objectUrl=URL.createObjectURL(blob);
+      premiumCache.set(cacheKey, objectUrl);
+      statusEl.textContent='';
+    }
+    premiumAudio.src=objectUrl;
+    premiumObjectUrl=objectUrl;
+    loadedAudioVoice=voice;
     premiumAudio.playbackRate=parseFloat(rateSlider.value);
-    statusEl.textContent='';
     await premiumAudio.play();
     playBtn.textContent='❚❚';
     updateMediaSession();
@@ -686,10 +701,16 @@ premiumAudio.addEventListener('ended',()=>{
   playPremiumFromChunk(nextChunk);
 });
 
+// Full wipe — only appropriate when the underlying document changes
+// (a new file), since cached audio from a different PDF is meaningless.
+// Page navigation and voice switching deliberately do NOT call this,
+// so revisiting a page or reverting to a previous voice stays free.
 function resetPremiumForPage(){
   premiumSegments=[]; currentSegmentIdx=0;
   premiumAudio.pause();
-  if(premiumObjectUrl){ URL.revokeObjectURL(premiumObjectUrl); premiumObjectUrl=null; }
+  premiumCache.forEach(url=>URL.revokeObjectURL(url));
+  premiumCache.clear();
+  premiumObjectUrl=null; loadedAudioVoice=null;
 }
 
 function updateMediaSession(){
@@ -728,9 +749,8 @@ playBtn.addEventListener('click',()=>{
       isPlaying=false;
       playBtn.textContent='▶';
       document.body.classList.remove('is-playing');
-    } else if(premiumAudio.src && premiumSegments.length){
-      // Resume: audio for this segment is already sitting in memory from
-      // before — just un-pause it. No fetch, no new OpenAI charge.
+    } else if(premiumAudio.src && premiumSegments.length && loadedAudioVoice===premiumVoiceSelect.value){
+      // Resume: same segment, same voice, already loaded — free.
       isPlaying=true;
       playBtn.textContent='❚❚';
       document.body.classList.add('is-playing');
@@ -754,7 +774,7 @@ restartCurrentPage=()=>{
 
 qualitySelect.addEventListener('change',()=>{
   stopSpeaking();
-  resetPremiumForPage();
+  premiumSegments=[]; currentSegmentIdx=0; // rebuilds cheaply from `sentences`; cache untouched
   const premium=qualitySelect.value==='premium';
   voiceSelect.style.display=premium?'none':'';
   premiumVoiceSelect.style.display=premium?'':'none';
@@ -762,10 +782,10 @@ qualitySelect.addEventListener('change',()=>{
 });
 
 prevBtn.addEventListener('click', async ()=>{
-  if(currentPage>1){ currentPage--; stopSpeaking(); resetPremiumForPage(); await renderPage(currentPage); await saveSession(); }
+  if(currentPage>1){ currentPage--; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
 });
 nextBtn.addEventListener('click', async ()=>{
-  if(currentPage<totalPages){ currentPage++; stopSpeaking(); resetPremiumForPage(); await renderPage(currentPage); await saveSession(); }
+  if(currentPage<totalPages){ currentPage++; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
 });
 
 // ---------- seek ----------
