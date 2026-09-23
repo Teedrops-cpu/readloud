@@ -722,8 +722,25 @@ async function goNextPage(){
 
 playBtn.addEventListener('click',()=>{
   if(qualitySelect.value==='premium'){
-    if(isPlaying){ stopSpeaking(); }
-    else { playPremiumFromChunk(currentSentenceIdx); }
+    if(isPlaying){
+      // Pause only — keep the already-generated audio loaded, cost nothing.
+      premiumAudio.pause();
+      isPlaying=false;
+      playBtn.textContent='▶';
+      document.body.classList.remove('is-playing');
+    } else if(premiumAudio.src && premiumSegments.length){
+      // Resume: audio for this segment is already sitting in memory from
+      // before — just un-pause it. No fetch, no new OpenAI charge.
+      isPlaying=true;
+      playBtn.textContent='❚❚';
+      document.body.classList.add('is-playing');
+      premiumAudio.play();
+      updateMediaSession();
+    } else {
+      // First play on this page/segment, or after a reset — this is the
+      // only path that actually costs money.
+      playPremiumFromChunk(currentSentenceIdx);
+    }
   } else {
     if(isPlaying){ stopSpeaking(); }
     else { speakFromSentence(currentSentenceIdx); }
