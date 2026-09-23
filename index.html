@@ -281,6 +281,26 @@
     </div>
 
     <div class="row">
+      <label class="rate-label">Voice quality
+        <select id="qualitySelect">
+          <option value="standard">Standard (free)</option>
+          <option value="premium">Premium (natural)</option>
+        </select>
+      </label>
+      <select id="premiumVoiceSelect" style="display:none;">
+        <option value="alloy">Alloy</option>
+        <option value="echo">Echo</option>
+        <option value="fable">Fable</option>
+        <option value="onyx">Onyx</option>
+        <option value="nova">Nova</option>
+        <option value="shimmer">Shimmer</option>
+      </select>
+    </div>
+    <div id="premiumNote" class="row" style="display:none;">
+      <span style="font-size:0.75rem;">Uses a small amount of paid credit per page.</span>
+    </div>
+
+    <div class="row">
       <label class="rate-label">Sleep timer
         <select id="sleepSelect">
           <option value="0">Off</option>
@@ -313,6 +333,8 @@ const rateSlider=document.getElementById('rateSlider'), rateVal=document.getElem
 const voiceSelect=document.getElementById('voiceSelect');
 const chapterSelect=document.getElementById('chapterSelect'), markChapterBtn=document.getElementById('markChapterBtn');
 const sleepSelect=document.getElementById('sleepSelect'), sleepCountdown=document.getElementById('sleepCountdown');
+const qualitySelect=document.getElementById('qualitySelect'), premiumVoiceSelect=document.getElementById('premiumVoiceSelect');
+const premiumNote=document.getElementById('premiumNote');
 const resumeBanner=document.getElementById('resumeBanner'), resumeText=document.getElementById('resumeText');
 const resumeYes=document.getElementById('resumeYes'), resumeNo=document.getElementById('resumeNo');
 
@@ -325,6 +347,13 @@ let fileMeta=null; // {name,size}
 let chapters=[]; // {title,page,source}
 let sleepTimeoutId=null, sleepIntervalId=null, sleepEndsAt=null;
 const WPS_BASE=2.3; // words per second baseline for duration estimate
+
+// ---- Premium (paid) voice config ----
+// Fill these in after deploying the Worker in /worker (see its README).
+const PREMIUM_TTS_ENDPOINT='https://readloud-tts-proxy.YOUR-SUBDOMAIN.workers.dev';
+const APP_SHARED_KEY='REPLACE_WITH_YOUR_APP_SHARED_KEY';
+const premiumAudio=new Audio();
+let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 
 // ---------- IndexedDB (tiny wrapper) ----------
 const DB_NAME='readloudDB', STORE='session';
@@ -509,6 +538,10 @@ function chunkForSeeking(text){
 }
 
 async function renderPage(num){
+  premiumSegments=[]; currentSegmentIdx=0;
+  premiumAudio.pause();
+  if(premiumObjectUrl){ URL.revokeObjectURL(premiumObjectUrl); premiumObjectUrl=null; }
+
   const page=await pdfDoc.getPage(num);
   const content=await page.getTextContent();
   const text=content.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
@@ -534,6 +567,7 @@ async function renderPage(num){
 // ---------- speech playback ----------
 function stopSpeaking(){
   speechSynthesis.cancel();
+  premiumAudio.pause();
   isPlaying=false;
   playBtn.textContent='▶';
   document.body.classList.remove('is-playing');
@@ -547,6 +581,7 @@ function highlightSentence(idx){
   });
 }
 
+// ---------- standard (free, browser) playback ----------
 function speakFromSentence(idx){
   stopSpeaking();
   if(idx<0) idx=0;
@@ -567,36 +602,165 @@ function speakFromSentence(idx){
   document.body.classList.add('is-playing');
 }
 
+// ---------- premium (paid, real audio) playback ----------
+// Packs the page's chunks into ~3800-char segments (OpenAI's request cap is
+// 4000), each becoming one audio file. Segments carry per-chunk character
+// offsets so we can map real audio.currentTime back to "which chunk is
+// playing" for the highlighter, and so seeking is genuine — a real
+// improvement over the free mode's estimated seek.
+function buildPremiumSegments(){
+  const segs=[]; let seg=null;
+  sentences.forEach((text,i)=>{
+    if(!seg || seg.text.length+text.length+1>3800){
+      seg={text:'', startIdx:i, chunkOffsets:[]};
+      segs.push(seg);
+    }
+    seg.chunkOffsets.push({idx:i, charStart:seg.text.length});
+    seg.text += (seg.text?' ':'') + text;
+  });
+  segs.forEach(s=>{ s.chunkOffsets.forEach((c,i)=>{
+    c.charEnd = i+1<s.chunkOffsets.length ? s.chunkOffsets[i+1].charStart : s.text.length;
+  });});
+  return segs;
+}
+
+async function fetchPremiumAudio(text){
+  const res=await fetch(PREMIUM_TTS_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-App-Key':APP_SHARED_KEY},
+    body:JSON.stringify({text, voice:premiumVoiceSelect.value}),
+  });
+  if(!res.ok){
+    let msg='Premium voice failed.';
+    try{ const j=await res.json(); if(j.error) msg=j.error; }catch(e){}
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+async function playPremiumFromChunk(idx){
+  if(idx<0) idx=0;
+  if(idx>=sentences.length){ goNextPage(); return; }
+  if(!premiumSegments.length) premiumSegments=buildPremiumSegments();
+  const segIdx=premiumSegments.findIndex(s=>idx>=s.startIdx && idx<s.startIdx+s.chunkOffsets.length);
+  currentSegmentIdx=segIdx<0?0:segIdx;
+  currentSentenceIdx=idx;
+  highlightSentence(idx);
+
+  const seg=premiumSegments[currentSegmentIdx];
+  isPlaying=true;
+  playBtn.textContent='⋯';
+  document.body.classList.add('is-playing');
+  statusEl.textContent='Loading premium audio…';
+  try{
+    const blob=await fetchPremiumAudio(seg.text);
+    if(!isPlaying) return; // stopped while loading
+    if(premiumObjectUrl) URL.revokeObjectURL(premiumObjectUrl);
+    premiumObjectUrl=URL.createObjectURL(blob);
+    premiumAudio.src=premiumObjectUrl;
+    premiumAudio.playbackRate=parseFloat(rateSlider.value);
+    statusEl.textContent='';
+    await premiumAudio.play();
+    playBtn.textContent='❚❚';
+    updateMediaSession();
+  }catch(e){
+    statusEl.textContent=e.message || 'Premium voice failed — try the standard voice.';
+    stopSpeaking();
+  }
+}
+
+premiumAudio.addEventListener('timeupdate',()=>{
+  if(!isPlaying || !premiumSegments.length) return;
+  const seg=premiumSegments[currentSegmentIdx];
+  if(!seg || !premiumAudio.duration) return;
+  const charPos=(premiumAudio.currentTime/premiumAudio.duration)*seg.text.length;
+  let localIdx=seg.chunkOffsets.findIndex(c=>charPos<c.charEnd);
+  if(localIdx===-1) localIdx=seg.chunkOffsets.length-1;
+  const globalIdx=seg.chunkOffsets[localIdx].idx;
+  if(globalIdx!==currentSentenceIdx){ currentSentenceIdx=globalIdx; highlightSentence(globalIdx); }
+});
+premiumAudio.addEventListener('ended',()=>{
+  if(!isPlaying) return;
+  const seg=premiumSegments[currentSegmentIdx];
+  const nextChunk=seg.startIdx+seg.chunkOffsets.length;
+  playPremiumFromChunk(nextChunk);
+});
+
+function resetPremiumForPage(){
+  premiumSegments=[]; currentSegmentIdx=0;
+  premiumAudio.pause();
+  if(premiumObjectUrl){ URL.revokeObjectURL(premiumObjectUrl); premiumObjectUrl=null; }
+}
+
+function updateMediaSession(){
+  if(!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata=new MediaMetadata({
+    title: docName.textContent,
+    artist: 'Readloud',
+    album: `Page ${currentPage} of ${totalPages}`,
+  });
+  navigator.mediaSession.playbackState=isPlaying?'playing':'paused';
+  navigator.mediaSession.setActionHandler('play',()=>playBtn.click());
+  navigator.mediaSession.setActionHandler('pause',()=>playBtn.click());
+  navigator.mediaSession.setActionHandler('seekbackward',()=>seekBy(-10));
+  navigator.mediaSession.setActionHandler('seekforward',()=>seekBy(10));
+  navigator.mediaSession.setActionHandler('previoustrack',()=>prevBtn.click());
+  navigator.mediaSession.setActionHandler('nexttrack',()=>nextBtn.click());
+}
+
 async function goNextPage(){
   if(currentPage<totalPages){
     currentPage++;
     await renderPage(currentPage);
     await saveSession();
-    speakFromSentence(0);
+    if(qualitySelect.value==='premium') playPremiumFromChunk(0);
+    else speakFromSentence(0);
   } else {
     stopSpeaking();
   }
 }
 
 playBtn.addEventListener('click',()=>{
-  if(isPlaying){
-    stopSpeaking();
+  if(qualitySelect.value==='premium'){
+    if(isPlaying){ stopSpeaking(); }
+    else { playPremiumFromChunk(currentSentenceIdx); }
   } else {
-    speakFromSentence(currentSentenceIdx);
+    if(isPlaying){ stopSpeaking(); }
+    else { speakFromSentence(currentSentenceIdx); }
   }
 });
 
-restartCurrentPage=()=>speakFromSentence(0);
+restartCurrentPage=()=>{
+  if(qualitySelect.value==='premium') playPremiumFromChunk(0);
+  else speakFromSentence(0);
+};
+
+qualitySelect.addEventListener('change',()=>{
+  stopSpeaking();
+  resetPremiumForPage();
+  const premium=qualitySelect.value==='premium';
+  voiceSelect.style.display=premium?'none':'';
+  premiumVoiceSelect.style.display=premium?'':'none';
+  premiumNote.style.display=premium?'flex':'none';
+});
 
 prevBtn.addEventListener('click', async ()=>{
-  if(currentPage>1){ currentPage--; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
+  if(currentPage>1){ currentPage--; stopSpeaking(); resetPremiumForPage(); await renderPage(currentPage); await saveSession(); }
 });
 nextBtn.addEventListener('click', async ()=>{
-  if(currentPage<totalPages){ currentPage++; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
+  if(currentPage<totalPages){ currentPage++; stopSpeaking(); resetPremiumForPage(); await renderPage(currentPage); await saveSession(); }
 });
 
-// ---------- seek (sentence-granularity approximation of seconds) ----------
+// ---------- seek ----------
+// Standard mode: sentence-granularity estimate (browser TTS can't be
+// seeked mid-utterance). Premium mode: real audio.currentTime — this one
+// is genuinely accurate, not an estimate.
 function seekBy(deltaSeconds){
+  if(qualitySelect.value==='premium'){
+    if(!premiumAudio.duration) return;
+    premiumAudio.currentTime=Math.max(0, Math.min(premiumAudio.duration, premiumAudio.currentTime+deltaSeconds));
+    return;
+  }
   if(sentences.length===0) return;
   const currentTime=(sentenceCum[currentSentenceIdx]||0);
   const targetTime=Math.max(0, currentTime+deltaSeconds);
@@ -651,6 +815,8 @@ fwd10.addEventListener('click',()=>seekBy(10));
 // ---------- speed ----------
 rateSlider.addEventListener('input',()=>{
   rateVal.textContent=parseFloat(rateSlider.value).toFixed(1)+'×';
+  premiumAudio.playbackRate=parseFloat(rateSlider.value);
+  if(qualitySelect.value==='premium') return; // real audio rate change is instant, no restart needed
   // recompute duration estimates at new rate, keep same sentence position
   const words=sentences.map(s=>s.split(/\s+/).filter(Boolean).length);
   const rate=parseFloat(rateSlider.value);

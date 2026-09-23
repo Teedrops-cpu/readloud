@@ -1,0 +1,15 @@
+name = "readloud-tts-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Comma-separated list of origins allowed to call this Worker.
+# Update this to match wherever Readloud is actually hosted.
+[vars]
+ALLOWED_ORIGINS = "https://readloud.tayooni2016.workers.dev,http://localhost:8000"
+DAILY_CHAR_LIMIT = "150000"
+
+# Created via: wrangler kv namespace create TTS_USAGE
+# Then paste the id it gives you below.
+[[kv_namespaces]]
+binding = "TTS_USAGE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
