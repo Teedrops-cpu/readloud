@@ -1,6 +1,14 @@
-// Readloud TTS proxy — the ONLY place the OpenAI API key ever lives.
-// The app never talks to OpenAI directly; it talks to this Worker,
-// which talks to OpenAI on its behalf and streams the audio back.
+// Readloud TTS proxy — holds the OpenAI key privately, verifies Gumroad
+// license keys, and tracks each account's remaining character balance.
+//
+// Two routes:
+//   POST /speak          { licenseKey, text, voice } -> audio/mpeg
+//   POST /redeem-topup   { baseLicenseKey, topupLicenseKey } -> new balance
+//
+// A Base Pack license key IS the account: its balance lives at
+// `license:{key}` in the LICENSES KV. A Top-up key isn't an account on its
+// own — it's a one-time code that, once redeemed, adds credit to an
+// existing base account and is then marked spent so it can't be reused.
 
 const VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const MAX_CHARS_PER_REQUEST = 4000; // OpenAI's own input cap for /v1/audio/speech
@@ -11,7 +19,7 @@ function corsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0] || '',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-App-Key',
+    'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   };
 }
@@ -23,75 +31,164 @@ function json(data, status, headers) {
   });
 }
 
-// Rough, non-strict daily budget tracker using KV. This is a safety net
-// against runaway cost (a leaked key, a bug, a bad actor) — not a precise
-// per-user metering system. KV writes aren't perfectly atomic under heavy
-// concurrency, so treat DAILY_CHAR_LIMIT as "roughly this much," not exact.
-async function checkAndReserveBudget(env, chars) {
+// Rough, non-strict daily budget tracker — a safety net against a global
+// runaway (a bug, an abused/stolen license), layered ON TOP of the real
+// per-account balances below. Not precise under heavy concurrency; that's
+// fine, it's a ceiling, not a meter.
+async function checkAndReserveDailyBudget(env, chars) {
   const dateKey = `usage:${new Date().toISOString().slice(0, 10)}`;
   const limit = Number(env.DAILY_CHAR_LIMIT || 0);
   const usedStr = await env.TTS_USAGE.get(dateKey);
   const used = usedStr ? parseInt(usedStr, 10) : 0;
-  if (limit && used + chars > limit) return { ok: false, used, limit };
+  if (limit && used + chars > limit) return false;
   await env.TTS_USAGE.put(dateKey, String(used + chars), { expirationTtl: 60 * 60 * 48 });
-  return { ok: true, used: used + chars, limit };
+  return true;
+}
+
+// Calls Gumroad's public license verification endpoint. No access token
+// needed for this — just the product ID and the key the customer got at
+// checkout. increment_uses_count is off since we track usage ourselves.
+async function verifyGumroadLicense(productId, licenseKey) {
+  const res = await fetch('https://api.gumroad.com/v2/licenses/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      product_id: productId,
+      license_key: licenseKey,
+      increment_uses_count: 'false',
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!data || !data.success) return { valid: false };
+  const p = data.purchase || {};
+  if (p.refunded || p.chargebacked || p.disputed) return { valid: false };
+  return { valid: true, purchase: p };
+}
+
+async function getBalance(env, licenseKey) {
+  const raw = await env.LICENSES.get(`license:${licenseKey}`);
+  return raw ? JSON.parse(raw) : null;
+}
+async function saveBalance(env, licenseKey, record) {
+  await env.LICENSES.put(`license:${licenseKey}`, JSON.stringify(record));
+}
+
+async function handleSpeak(request, env, cors) {
+  let body;
+  try { body = await request.json(); } catch (e) {
+    return json({ error: 'invalid JSON body' }, 400, cors);
+  }
+
+  const licenseKey = typeof body.licenseKey === 'string' ? body.licenseKey.trim() : '';
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
+  const voice = VOICES.includes(body.voice) ? body.voice : 'alloy';
+
+  if (!licenseKey) return json({ error: 'licenseKey is required' }, 400, cors);
+  if (!text) return json({ error: 'text is required' }, 400, cors);
+  if (text.length > MAX_CHARS_PER_REQUEST) {
+    return json({ error: `text exceeds ${MAX_CHARS_PER_REQUEST} character limit per request` }, 400, cors);
+  }
+
+  // Load (or lazily create) this account's balance.
+  let account = await getBalance(env, licenseKey);
+  if (!account) {
+    const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
+    if (!check.valid) {
+      return json({ error: 'invalid or inactive license key' }, 401, cors);
+    }
+    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
+    await saveBalance(env, licenseKey, account);
+  }
+
+  if (account.charsRemaining < text.length) {
+    return json({ error: 'out of premium narration credit — buy a top-up pack to continue' }, 402, cors);
+  }
+
+  const withinDailyBudget = await checkAndReserveDailyBudget(env, text.length);
+  if (!withinDailyBudget) {
+    return json({ error: 'daily voice budget reached — try again tomorrow, or use the free voice for now' }, 429, cors);
+  }
+
+  const openaiRes = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model: 'tts-1', voice, input: text, response_format: 'mp3' }),
+  });
+
+  if (!openaiRes.ok) {
+    const detail = await openaiRes.text();
+    return json({ error: 'upstream TTS request failed', detail }, 502, cors);
+  }
+
+  // Only deduct after OpenAI actually succeeded — a failed generation
+  // shouldn't cost the customer their credit.
+  account.charsRemaining -= text.length;
+  account.lastUsed = Date.now();
+  await saveBalance(env, licenseKey, account);
+
+  return new Response(openaiRes.body, {
+    status: 200,
+    headers: {
+      ...cors,
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-store',
+      'X-Chars-Remaining': String(account.charsRemaining),
+    },
+  });
+}
+
+async function handleRedeemTopup(request, env, cors) {
+  let body;
+  try { body = await request.json(); } catch (e) {
+    return json({ error: 'invalid JSON body' }, 400, cors);
+  }
+  const baseLicenseKey = typeof body.baseLicenseKey === 'string' ? body.baseLicenseKey.trim() : '';
+  const topupLicenseKey = typeof body.topupLicenseKey === 'string' ? body.topupLicenseKey.trim() : '';
+
+  if (!baseLicenseKey || !topupLicenseKey) {
+    return json({ error: 'baseLicenseKey and topupLicenseKey are both required' }, 400, cors);
+  }
+
+  // The base key must be a real, active account (create it if this is
+  // someone's very first redemption before ever calling /speak).
+  let account = await getBalance(env, baseLicenseKey);
+  if (!account) {
+    const baseCheck = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, baseLicenseKey);
+    if (!baseCheck.valid) return json({ error: 'invalid or inactive base license key' }, 401, cors);
+    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
+  }
+
+  // The top-up key must not have been redeemed before, anywhere.
+  const alreadyRedeemed = await env.LICENSES.get(`redeemed:${topupLicenseKey}`);
+  if (alreadyRedeemed) {
+    return json({ error: 'this top-up code has already been redeemed' }, 409, cors);
+  }
+
+  const topupCheck = await verifyGumroadLicense(env.GUMROAD_TOPUP_PRODUCT_ID, topupLicenseKey);
+  if (!topupCheck.valid) {
+    return json({ error: 'invalid or inactive top-up license key' }, 401, cors);
+  }
+
+  account.charsRemaining += Number(env.TOPUP_CHARS || 0);
+  await saveBalance(env, baseLicenseKey, account);
+  await env.LICENSES.put(`redeemed:${topupLicenseKey}`, JSON.stringify({
+    redeemedAt: Date.now(), appliedToBaseKey: baseLicenseKey,
+  }));
+
+  return json({ ok: true, charsRemaining: account.charsRemaining }, 200, cors);
 }
 
 export default {
   async fetch(request, env) {
     const cors = corsHeaders(request, env);
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405, cors);
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: cors });
-    }
-    if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405, cors);
-    }
-
-    // Casual deterrent only — see the note in the project README about
-    // why a client-side app can never truly hide this key.
-    const appKey = request.headers.get('X-App-Key');
-    if (!env.APP_SHARED_KEY || appKey !== env.APP_SHARED_KEY) {
-      return json({ error: 'unauthorized' }, 401, cors);
-    }
-
-    let body;
-    try {
-      body = await request.json();
-    } catch (e) {
-      return json({ error: 'invalid JSON body' }, 400, cors);
-    }
-
-    const text = typeof body.text === 'string' ? body.text.trim() : '';
-    const voice = VOICES.includes(body.voice) ? body.voice : 'alloy';
-
-    if (!text) return json({ error: 'text is required' }, 400, cors);
-    if (text.length > MAX_CHARS_PER_REQUEST) {
-      return json({ error: `text exceeds ${MAX_CHARS_PER_REQUEST} character limit per request` }, 400, cors);
-    }
-
-    const budget = await checkAndReserveBudget(env, text.length);
-    if (!budget.ok) {
-      return json({ error: 'daily voice budget reached — try again tomorrow, or use the free voice for now' }, 429, cors);
-    }
-
-    const openaiRes = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ model: 'tts-1', voice, input: text, response_format: 'mp3' }),
-    });
-
-    if (!openaiRes.ok) {
-      const detail = await openaiRes.text();
-      return json({ error: 'upstream TTS request failed', detail }, 502, cors);
-    }
-
-    return new Response(openaiRes.body, {
-      status: 200,
-      headers: { ...cors, 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' },
-    });
+    const url = new URL(request.url);
+    if (url.pathname === '/redeem-topup') return handleRedeemTopup(request, env, cors);
+    return handleSpeak(request, env, cors); // default route: /speak (and /)
   },
 };

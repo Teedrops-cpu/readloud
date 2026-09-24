@@ -2,14 +2,26 @@ name = "readloud-tts-proxy"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# Comma-separated list of origins allowed to call this Worker.
-# Update this to match wherever Readloud is actually hosted.
 [vars]
 ALLOWED_ORIGINS = "https://readloud.tayooni2016.workers.dev,http://localhost:8000"
 DAILY_CHAR_LIMIT = "150000"
 
+# Gumroad product IDs (safe/public — not secrets, visible in your product URLs)
+GUMROAD_BASE_PRODUCT_ID = "H60_kGRdDn0eVKx9ocAmtQ=="
+GUMROAD_TOPUP_PRODUCT_ID = "KTGBgzkvTfZRjHOj9sMkKA=="
+
+# Character budgets per purchase. ~2,500 chars/page, so 250000 ≈ 100 pages,
+# 125000 ≈ 50 pages. Tune these if real pages run denser/sparser than assumed.
+BASE_PACK_CHARS = "250000"
+TOPUP_CHARS = "125000"
+
 # Created via: wrangler kv namespace create TTS_USAGE
-# Then paste the id it gives you below.
 [[kv_namespaces]]
 binding = "TTS_USAGE"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# Created via: wrangler kv namespace create LICENSES
+# Stores: license:{key} -> {charsRemaining, ...} and redeemed:{topupKey} -> {...}
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "REPLACE_WITH_YOUR_LICENSES_KV_ID"

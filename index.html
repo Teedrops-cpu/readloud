@@ -300,6 +300,18 @@
       <span style="font-size:0.75rem;">Uses a small amount of paid credit per page.</span>
     </div>
 
+    <div id="licenseBox" style="display:none;">
+      <div class="chapter-row">
+        <input type="text" id="licenseKeyInput" placeholder="Paste your Readloud license key" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
+        <button class="secondary" id="activateLicenseBtn" style="padding:6px 12px;font-size:0.78rem;">Activate</button>
+      </div>
+      <div id="licenseStatus" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.75rem;color:var(--muted);margin:4px 0 10px;"></div>
+      <div class="chapter-row" id="topupBox" style="display:none;">
+        <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
+        <button class="secondary" id="redeemTopupBtn" style="padding:6px 12px;font-size:0.78rem;">Redeem</button>
+      </div>
+    </div>
+
     <div class="row">
       <label class="rate-label">Sleep timer
         <select id="sleepSelect">
@@ -349,15 +361,16 @@ let sleepTimeoutId=null, sleepIntervalId=null, sleepEndsAt=null;
 const WPS_BASE=2.3; // words per second baseline for duration estimate
 
 // ---- Premium (paid) voice config ----
-// Fill these in after deploying the Worker in /worker (see its README).
-const PREMIUM_TTS_ENDPOINT='https://readloud-tts-proxy.tayooni2016.workers.dev';
-const APP_SHARED_KEY='#H~?JV<dujhe;g5bh$%236o';
+// This is your deployed Worker's base URL from `wrangler deploy` — no
+// trailing slash. The app calls {base}/speak and {base}/redeem-topup.
+const PREMIUM_TTS_BASE='https://readloud-tts-proxy.tayooni2016.workers.dev';
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 // Caches generated audio per page+segment+voice so switching back to a
 // voice you already generated on this page replays it for free instead
-// of re-billing OpenAI. Cleared whenever the page changes.
+// of re-billing OpenAI. Persists for the session; only clears on a new file.
 let premiumCache=new Map(), loadedAudioVoice=null;
+let licenseKey=localStorage.getItem('readloud_license_key')||'';
 
 // ---------- IndexedDB (tiny wrapper) ----------
 const DB_NAME='readloudDB', STORE='session';
@@ -640,15 +653,17 @@ async function getPageChunks(pageNum){
 }
 
 async function fetchPremiumAudio(text, voiceOverride){
-  const res=await fetch(PREMIUM_TTS_ENDPOINT,{
+  const res=await fetch(`${PREMIUM_TTS_BASE}/speak`,{
     method:'POST',
-    headers:{'Content-Type':'application/json','X-App-Key':APP_SHARED_KEY},
-    body:JSON.stringify({text, voice:voiceOverride||premiumVoiceSelect.value}),
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({licenseKey, text, voice:voiceOverride||premiumVoiceSelect.value}),
   });
   if(!res.ok){
     let msg='Premium voice failed.';
     try{ const j=await res.json(); if(j.error) msg=j.error; }catch(e){}
-    throw new Error(msg);
+    const err=new Error(msg);
+    err.status=res.status;
+    throw err;
   }
   return res.blob();
 }
@@ -817,6 +832,66 @@ restartCurrentPage=()=>{
   else speakFromSentence(0);
 };
 
+const licenseBox=document.getElementById('licenseBox'), licenseKeyInput=document.getElementById('licenseKeyInput');
+const activateLicenseBtn=document.getElementById('activateLicenseBtn'), licenseStatus=document.getElementById('licenseStatus');
+const topupBox=document.getElementById('topupBox'), topupKeyInput=document.getElementById('topupKeyInput'), redeemTopupBtn=document.getElementById('redeemTopupBtn');
+
+function renderLicenseStatus(){
+  if(licenseKey){
+    licenseKeyInput.value=licenseKey;
+    licenseStatus.textContent='Premium activated. Balance updates after your next play.';
+    topupBox.style.display='flex';
+  } else {
+    licenseStatus.textContent='Enter your Base Pack license key (from your Gumroad receipt) to activate premium voice.';
+    topupBox.style.display='none';
+  }
+}
+
+activateLicenseBtn.addEventListener('click', async ()=>{
+  const val=licenseKeyInput.value.trim();
+  if(!val){ licenseStatus.textContent='Paste a license key first.'; return; }
+  licenseStatus.textContent='Checking…';
+  try{
+    // Validate with a trivial real request (a single space) — costs an
+    // effectively negligible sliver of credit, but confirms the key is
+    // genuinely active against Gumroad rather than just saving it blind.
+    const res=await fetch(`${PREMIUM_TTS_BASE}/speak`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({licenseKey:val, text:'Hi', voice:premiumVoiceSelect.value||'alloy'}),
+    });
+    if(!res.ok){
+      const data=await res.json().catch(()=>({}));
+      throw new Error(data.error || 'Could not activate that key.');
+    }
+    licenseKey=val;
+    localStorage.setItem('readloud_license_key', licenseKey);
+    renderLicenseStatus();
+  }catch(e){
+    licenseStatus.textContent=e.message || 'Could not activate that key.';
+  }
+});
+
+redeemTopupBtn.addEventListener('click', async ()=>{
+  const topupVal=topupKeyInput.value.trim();
+  if(!licenseKey){ licenseStatus.textContent='Activate your Base Pack key first.'; return; }
+  if(!topupVal){ licenseStatus.textContent='Paste your top-up code first.'; return; }
+  licenseStatus.textContent='Redeeming…';
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/redeem-topup`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({baseLicenseKey:licenseKey, topupLicenseKey:topupVal}),
+    });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||'Redeem failed.');
+    licenseStatus.textContent=`Added! New balance: ~${Math.round(data.charsRemaining/2500)} pages.`;
+    topupKeyInput.value='';
+  }catch(e){
+    licenseStatus.textContent=e.message || 'Could not redeem that code.';
+  }
+});
+
 qualitySelect.addEventListener('change',()=>{
   stopSpeaking();
   premiumSegments=[]; currentSegmentIdx=0; // rebuilds cheaply from `sentences`; cache untouched
@@ -824,6 +899,8 @@ qualitySelect.addEventListener('change',()=>{
   voiceSelect.style.display=premium?'none':'';
   premiumVoiceSelect.style.display=premium?'':'none';
   premiumNote.style.display=premium?'flex':'none';
+  licenseBox.style.display=premium?'block':'none';
+  if(premium) renderLicenseStatus();
 });
 
 prevBtn.addEventListener('click', async ()=>{
