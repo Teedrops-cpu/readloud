@@ -18,10 +18,10 @@ TOPUP_CHARS = "125000"
 # Created via: wrangler kv namespace create TTS_USAGE
 [[kv_namespaces]]
 binding = "TTS_USAGE"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "1674038b78e548e7a202f66fb1c0d6c8"
 
 # Created via: wrangler kv namespace create LICENSES
 # Stores: license:{key} -> {charsRemaining, ...} and redeemed:{topupKey} -> {...}
 [[kv_namespaces]]
 binding = "LICENSES"
-id = "REPLACE_WITH_YOUR_LICENSES_KV_ID"
+id = "bdb76aba9ab346d9a67ae77a7a75f02a"
