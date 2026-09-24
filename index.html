@@ -306,6 +306,7 @@
         <button class="secondary" id="activateLicenseBtn" style="padding:6px 12px;font-size:0.78rem;">Activate</button>
       </div>
       <div id="licenseStatus" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.75rem;color:var(--muted);margin:4px 0 10px;"></div>
+      <button class="secondary" id="transferBtn" style="display:none;padding:6px 12px;font-size:0.78rem;margin-bottom:10px;">Move license to this device</button>
       <div class="chapter-row" id="topupBox" style="display:none;">
         <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
         <button class="secondary" id="redeemTopupBtn" style="padding:6px 12px;font-size:0.78rem;">Redeem</button>
@@ -363,7 +364,7 @@ const WPS_BASE=2.3; // words per second baseline for duration estimate
 // ---- Premium (paid) voice config ----
 // This is your deployed Worker's base URL from `wrangler deploy` — no
 // trailing slash. The app calls {base}/speak and {base}/redeem-topup.
-const PREMIUM_TTS_BASE='https://readloud-tts-proxy.tayooni2016.workers.dev';
+const PREMIUM_TTS_BASE='https://readloud-tts-proxy.YOUR-SUBDOMAIN.workers.dev';
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 // Caches generated audio per page+segment+voice so switching back to a
@@ -371,6 +372,18 @@ let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 // of re-billing OpenAI. Persists for the session; only clears on a new file.
 let premiumCache=new Map(), loadedAudioVoice=null;
 let licenseKey=localStorage.getItem('readloud_license_key')||'';
+// A random ID for this browser, used to keep each license on one active
+// device. Clearing site data makes this browser look new — the owner then
+// uses "Move license to this device" (rate-limited server-side).
+function getDeviceId(){
+  let id=localStorage.getItem('readloud_device_id');
+  if(!id){
+    id=(crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12));
+    localStorage.setItem('readloud_device_id', id);
+  }
+  return id;
+}
+const deviceId=getDeviceId();
 
 // ---------- IndexedDB (tiny wrapper) ----------
 const DB_NAME='readloudDB', STORE='session';
@@ -656,13 +669,15 @@ async function fetchPremiumAudio(text, voiceOverride){
   const res=await fetch(`${PREMIUM_TTS_BASE}/speak`,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({licenseKey, text, voice:voiceOverride||premiumVoiceSelect.value}),
+    body:JSON.stringify({licenseKey, deviceId, text, voice:voiceOverride||premiumVoiceSelect.value}),
   });
   if(!res.ok){
     let msg='Premium voice failed.';
-    try{ const j=await res.json(); if(j.error) msg=j.error; }catch(e){}
+    let code='';
+    try{ const j=await res.json(); if(j.error) msg=j.error; if(j.code) code=j.code; }catch(e){}
     const err=new Error(msg);
     err.status=res.status;
+    err.code=code;
     throw err;
   }
   return res.blob();
@@ -740,6 +755,7 @@ async function playPremiumFromChunk(idx){
     if(currentSegmentIdx===0) prefetchNextPage(); // kick off in the background, don't await
   }catch(e){
     statusEl.textContent=e.message || 'Premium voice failed — try the standard voice.';
+    if(e.code==='device_mismatch') showTransferOption(licenseKey, e.message);
     stopSpeaking();
   }
 }
@@ -836,6 +852,36 @@ const licenseBox=document.getElementById('licenseBox'), licenseKeyInput=document
 const activateLicenseBtn=document.getElementById('activateLicenseBtn'), licenseStatus=document.getElementById('licenseStatus');
 const topupBox=document.getElementById('topupBox'), topupKeyInput=document.getElementById('topupKeyInput'), redeemTopupBtn=document.getElementById('redeemTopupBtn');
 
+const transferBtn=document.getElementById('transferBtn');
+let pendingTransferKey='';
+function showTransferOption(key, msg){
+  pendingTransferKey=key;
+  licenseBox.style.display='block';
+  licenseStatus.textContent=msg+' Moving it signs out the other device, and it can only be moved once every 7 days.';
+  transferBtn.style.display='';
+}
+transferBtn.addEventListener('click', async ()=>{
+  if(!pendingTransferKey) return;
+  licenseStatus.textContent='Moving license…';
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/transfer-device`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({licenseKey:pendingTransferKey, deviceId}),
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||'Could not move the license.');
+    licenseKey=pendingTransferKey;
+    localStorage.setItem('readloud_license_key', licenseKey);
+    pendingTransferKey='';
+    transferBtn.style.display='none';
+    renderLicenseStatus();
+    statusEl.textContent='';
+  }catch(e){
+    licenseStatus.textContent=e.message;
+  }
+});
+
 function renderLicenseStatus(){
   if(licenseKey){
     licenseKeyInput.value=licenseKey;
@@ -858,14 +904,16 @@ activateLicenseBtn.addEventListener('click', async ()=>{
     const res=await fetch(`${PREMIUM_TTS_BASE}/speak`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({licenseKey:val, text:'Hi', voice:premiumVoiceSelect.value||'alloy'}),
+      body:JSON.stringify({licenseKey:val, deviceId, text:'Hi', voice:premiumVoiceSelect.value||'alloy'}),
     });
     if(!res.ok){
       const data=await res.json().catch(()=>({}));
+      if(data.code==='device_mismatch'){ showTransferOption(val, data.error); return; }
       throw new Error(data.error || 'Could not activate that key.');
     }
     licenseKey=val;
     localStorage.setItem('readloud_license_key', licenseKey);
+    transferBtn.style.display='none';
     renderLicenseStatus();
   }catch(e){
     licenseStatus.textContent=e.message || 'Could not activate that key.';
@@ -881,10 +929,13 @@ redeemTopupBtn.addEventListener('click', async ()=>{
     const res=await fetch(`${PREMIUM_TTS_BASE}/redeem-topup`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({baseLicenseKey:licenseKey, topupLicenseKey:topupVal}),
+      body:JSON.stringify({baseLicenseKey:licenseKey, topupLicenseKey:topupVal, deviceId}),
     });
     const data=await res.json();
-    if(!res.ok) throw new Error(data.error||'Redeem failed.');
+    if(!res.ok){
+      if(data.code==='device_mismatch'){ showTransferOption(licenseKey, data.error); return; }
+      throw new Error(data.error||'Redeem failed.');
+    }
     licenseStatus.textContent=`Added! New balance: ~${Math.round(data.charsRemaining/2500)} pages.`;
     topupKeyInput.value='';
   }catch(e){
