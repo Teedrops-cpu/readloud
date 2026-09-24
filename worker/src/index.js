@@ -73,6 +73,26 @@ async function saveBalance(env, licenseKey, record) {
   await env.LICENSES.put(`license:${licenseKey}`, JSON.stringify(record));
 }
 
+// ---------- one-active-device-per-license ----------
+// Each account remembers the one device (a random ID the app generates
+// and keeps in the browser) it's currently bound to. Any other device is
+// refused until the owner explicitly moves the license, which is rate-
+// limited so a key can't be passed back and forth between people.
+function deviceMismatch(cors) {
+  return json({
+    error: 'This license is active on another device. Use "Move license to this device" to switch.',
+    code: 'device_mismatch',
+  }, 403, cors);
+}
+// Returns true if the account is (or has just become) bound to deviceId.
+function bindOrCheckDevice(account, deviceId) {
+  if (!account.deviceId) { account.deviceId = deviceId; account.deviceBoundAt = Date.now(); return true; }
+  return account.deviceId === deviceId;
+}
+function cleanDeviceId(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(v.trim()) ? v.trim() : '';
+}
+
 async function handleSpeak(request, env, cors) {
   let body;
   try { body = await request.json(); } catch (e) {
@@ -80,10 +100,12 @@ async function handleSpeak(request, env, cors) {
   }
 
   const licenseKey = typeof body.licenseKey === 'string' ? body.licenseKey.trim() : '';
+  const deviceId = cleanDeviceId(body.deviceId);
   const text = typeof body.text === 'string' ? body.text.trim() : '';
   const voice = VOICES.includes(body.voice) ? body.voice : 'alloy';
 
   if (!licenseKey) return json({ error: 'licenseKey is required' }, 400, cors);
+  if (!deviceId) return json({ error: 'deviceId is required — please refresh the app' }, 400, cors);
   if (!text) return json({ error: 'text is required' }, 400, cors);
   if (text.length > MAX_CHARS_PER_REQUEST) {
     return json({ error: `text exceeds ${MAX_CHARS_PER_REQUEST} character limit per request` }, 400, cors);
@@ -99,6 +121,10 @@ async function handleSpeak(request, env, cors) {
     account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
     await saveBalance(env, licenseKey, account);
   }
+
+  const wasUnbound = !account.deviceId;
+  if (!bindOrCheckDevice(account, deviceId)) return deviceMismatch(cors);
+  if (wasUnbound) await saveBalance(env, licenseKey, account);
 
   if (account.charsRemaining < text.length) {
     return json({ error: 'out of premium narration credit — buy a top-up pack to continue' }, 402, cors);
@@ -147,6 +173,8 @@ async function handleRedeemTopup(request, env, cors) {
   }
   const baseLicenseKey = typeof body.baseLicenseKey === 'string' ? body.baseLicenseKey.trim() : '';
   const topupLicenseKey = typeof body.topupLicenseKey === 'string' ? body.topupLicenseKey.trim() : '';
+  const deviceId = cleanDeviceId(body.deviceId);
+  if (!deviceId) return json({ error: 'deviceId is required — please refresh the app' }, 400, cors);
 
   if (!baseLicenseKey || !topupLicenseKey) {
     return json({ error: 'baseLicenseKey and topupLicenseKey are both required' }, 400, cors);
@@ -160,6 +188,7 @@ async function handleRedeemTopup(request, env, cors) {
     if (!baseCheck.valid) return json({ error: 'invalid or inactive base license key' }, 401, cors);
     account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
   }
+  if (!bindOrCheckDevice(account, deviceId)) return deviceMismatch(cors);
 
   // The top-up key must not have been redeemed before, anywhere.
   const alreadyRedeemed = await env.LICENSES.get(`redeemed:${topupLicenseKey}`);
@@ -181,6 +210,50 @@ async function handleRedeemTopup(request, env, cors) {
   return json({ ok: true, charsRemaining: account.charsRemaining }, 200, cors);
 }
 
+// Moves a license to the calling device. Rate-limited: after a move, the
+// license can't be moved again for TRANSFER_COOLDOWN_DAYS. A real owner
+// switching phones or clearing their browser is unaffected; two people
+// trying to share one key keep kicking each other off and then get stuck.
+async function handleTransferDevice(request, env, cors) {
+  let body;
+  try { body = await request.json(); } catch (e) {
+    return json({ error: 'invalid JSON body' }, 400, cors);
+  }
+  const licenseKey = typeof body.licenseKey === 'string' ? body.licenseKey.trim() : '';
+  const deviceId = cleanDeviceId(body.deviceId);
+  if (!licenseKey || !deviceId) return json({ error: 'licenseKey and deviceId are required' }, 400, cors);
+
+  let account = await getBalance(env, licenseKey);
+  if (!account) {
+    const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
+    if (!check.valid) return json({ error: 'invalid or inactive license key' }, 401, cors);
+    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
+  } else {
+    // Re-verify on every move so a refunded license can't be kept alive.
+    const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
+    if (!check.valid) return json({ error: 'invalid or inactive license key' }, 401, cors);
+  }
+
+  if (account.deviceId === deviceId) {
+    return json({ ok: true, charsRemaining: account.charsRemaining, alreadyHere: true }, 200, cors);
+  }
+
+  const cooldownMs = Number(env.TRANSFER_COOLDOWN_DAYS || 7) * 24 * 60 * 60 * 1000;
+  if (account.deviceId && account.lastTransferAt && Date.now() - account.lastTransferAt < cooldownMs) {
+    const nextAllowed = new Date(account.lastTransferAt + cooldownMs).toISOString().slice(0, 10);
+    return json({
+      error: `This license was moved recently. It can be moved again on ${nextAllowed}.`,
+      code: 'transfer_cooldown',
+    }, 429, cors);
+  }
+
+  if (account.deviceId) account.lastTransferAt = Date.now(); // first-ever bind isn't a "move"
+  account.deviceId = deviceId;
+  account.deviceBoundAt = Date.now();
+  await saveBalance(env, licenseKey, account);
+  return json({ ok: true, charsRemaining: account.charsRemaining }, 200, cors);
+}
+
 export default {
   async fetch(request, env) {
     const cors = corsHeaders(request, env);
@@ -189,6 +262,7 @@ export default {
 
     const url = new URL(request.url);
     if (url.pathname === '/redeem-topup') return handleRedeemTopup(request, env, cors);
+    if (url.pathname === '/transfer-device') return handleTransferDevice(request, env, cors);
     return handleSpeak(request, env, cors); // default route: /speak (and /)
   },
 };
