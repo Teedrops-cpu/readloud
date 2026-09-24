@@ -65,6 +65,28 @@ async function verifyGumroadLicense(productId, licenseKey) {
   return { valid: true, purchase: p };
 }
 
+// Re-checks an existing account against Gumroad at most once per
+// REVERIFY_HOURS. If the purchase has since been refunded, charged back,
+// or its license disabled in Gumroad, the account is permanently revoked.
+async function ensureStillValid(env, licenseKey, account) {
+  if (account.revoked) return false;
+  const maxAgeMs = Number(env.REVERIFY_HOURS || 24) * 60 * 60 * 1000;
+  if (account.lastVerifiedAt && Date.now() - account.lastVerifiedAt < maxAgeMs) return true;
+  const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
+  if (!check.valid) {
+    account.revoked = true;
+    account.revokedAt = Date.now();
+    await saveBalance(env, licenseKey, account);
+    return false;
+  }
+  account.lastVerifiedAt = Date.now();
+  await saveBalance(env, licenseKey, account);
+  return true;
+}
+function revokedResponse(cors) {
+  return json({ error: 'This license is no longer active (refunded or disabled).', code: 'revoked' }, 401, cors);
+}
+
 async function getBalance(env, licenseKey) {
   const raw = await env.LICENSES.get(`license:${licenseKey}`);
   return raw ? JSON.parse(raw) : null;
@@ -118,8 +140,10 @@ async function handleSpeak(request, env, cors) {
     if (!check.valid) {
       return json({ error: 'invalid or inactive license key' }, 401, cors);
     }
-    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
+    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now(), lastVerifiedAt: Date.now() };
     await saveBalance(env, licenseKey, account);
+  } else if (!(await ensureStillValid(env, licenseKey, account))) {
+    return revokedResponse(cors);
   }
 
   const wasUnbound = !account.deviceId;
@@ -186,7 +210,9 @@ async function handleRedeemTopup(request, env, cors) {
   if (!account) {
     const baseCheck = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, baseLicenseKey);
     if (!baseCheck.valid) return json({ error: 'invalid or inactive base license key' }, 401, cors);
-    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
+    account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now(), lastVerifiedAt: Date.now() };
+  } else if (!(await ensureStillValid(env, baseLicenseKey, account))) {
+    return revokedResponse(cors);
   }
   if (!bindOrCheckDevice(account, deviceId)) return deviceMismatch(cors);
 
@@ -230,8 +256,14 @@ async function handleTransferDevice(request, env, cors) {
     account = { charsRemaining: Number(env.BASE_PACK_CHARS || 0), createdAt: Date.now() };
   } else {
     // Re-verify on every move so a refunded license can't be kept alive.
+    if (account.revoked) return revokedResponse(cors);
     const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
-    if (!check.valid) return json({ error: 'invalid or inactive license key' }, 401, cors);
+    if (!check.valid) {
+      account.revoked = true; account.revokedAt = Date.now();
+      await saveBalance(env, licenseKey, account);
+      return revokedResponse(cors);
+    }
+    account.lastVerifiedAt = Date.now();
   }
 
   if (account.deviceId === deviceId) {

@@ -19,6 +19,10 @@ TOPUP_CHARS = "125000"
 # it can't be moved again for this many days — stops passing a key around.
 TRANSFER_COOLDOWN_DAYS = "7"
 
+# How often an active license is re-checked with Gumroad. A refund,
+# chargeback, or license disabled in Gumroad takes effect within this window.
+REVERIFY_HOURS = "24"
+
 # Created via: wrangler kv namespace create TTS_USAGE
 [[kv_namespaces]]
 binding = "TTS_USAGE"
