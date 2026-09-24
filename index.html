@@ -350,7 +350,7 @@ const WPS_BASE=2.3; // words per second baseline for duration estimate
 
 // ---- Premium (paid) voice config ----
 // Fill these in after deploying the Worker in /worker (see its README).
-const PREMIUM_TTS_ENDPOINT=' https://readloud-tts-proxy.tayooni2016.workers.dev';
+const PREMIUM_TTS_ENDPOINT='https://readloud-tts-proxy.tayooni2016.workers.dev';
 const APP_SHARED_KEY='#H~?JV<dujhe;g5bh$%236o';
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
@@ -612,9 +612,9 @@ function speakFromSentence(idx){
 // offsets so we can map real audio.currentTime back to "which chunk is
 // playing" for the highlighter, and so seeking is genuine — a real
 // improvement over the free mode's estimated seek.
-function buildPremiumSegments(){
+function buildSegmentsFromChunks(chunks){
   const segs=[]; let seg=null;
-  sentences.forEach((text,i)=>{
+  chunks.forEach((text,i)=>{
     if(!seg || seg.text.length+text.length+1>3800){
       seg={text:'', startIdx:i, chunkOffsets:[]};
       segs.push(seg);
@@ -627,12 +627,23 @@ function buildPremiumSegments(){
   });});
   return segs;
 }
+function buildPremiumSegments(){ return buildSegmentsFromChunks(sentences); }
 
-async function fetchPremiumAudio(text){
+// Pure helper — extracts and chunks a page's text WITHOUT touching any
+// global state, so it's safe to call for a page the user isn't currently
+// viewing (used by the background prefetch below).
+async function getPageChunks(pageNum){
+  const page=await pdfDoc.getPage(pageNum);
+  const content=await page.getTextContent();
+  const text=content.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
+  return chunkForSeeking(text);
+}
+
+async function fetchPremiumAudio(text, voiceOverride){
   const res=await fetch(PREMIUM_TTS_ENDPOINT,{
     method:'POST',
     headers:{'Content-Type':'application/json','X-App-Key':APP_SHARED_KEY},
-    body:JSON.stringify({text, voice:premiumVoiceSelect.value}),
+    body:JSON.stringify({text, voice:voiceOverride||premiumVoiceSelect.value}),
   });
   if(!res.ok){
     let msg='Premium voice failed.';
@@ -640,6 +651,39 @@ async function fetchPremiumAudio(text){
     throw new Error(msg);
   }
   return res.blob();
+}
+
+// Quietly generates the NEXT page's opening audio while the current page
+// is still playing, so a page turn — even one that happens while the
+// phone is locked — only has to swap to already-loaded audio instead of
+// making a fresh network request. Background tabs are far more likely to
+// survive "play this file I already have" than "go fetch something new."
+// This doesn't cost anything extra overall — it's audio you'd generate
+// anyway when you reach that page, just started earlier.
+let prefetchInFlight=new Set();
+async function prefetchNextPage(){
+  if(qualitySelect.value!=='premium') return;
+  const nextPageNum=currentPage+1;
+  if(nextPageNum>totalPages) return;
+  const voice=premiumVoiceSelect.value;
+  const flightKey=`${nextPageNum}:${voice}`;
+  if(prefetchInFlight.has(flightKey)) return;
+  prefetchInFlight.add(flightKey);
+  try{
+    const chunks=await getPageChunks(nextPageNum);
+    const segs=buildSegmentsFromChunks(chunks);
+    if(!segs.length) return;
+    const cacheKey=`${nextPageNum}:0:${voice}`;
+    if(premiumCache.has(cacheKey)) return;
+    const blob=await fetchPremiumAudio(segs[0].text, voice);
+    const url=URL.createObjectURL(blob);
+    premiumCache.set(cacheKey, url);
+  }catch(e){
+    // Silent by design — this is speculative. A failed prefetch just means
+    // the normal, visible loading happens when the user actually arrives.
+  }finally{
+    prefetchInFlight.delete(flightKey);
+  }
 }
 
 async function playPremiumFromChunk(idx){
@@ -665,7 +709,7 @@ async function playPremiumFromChunk(idx){
       statusEl.textContent='';
     } else {
       statusEl.textContent='Loading premium audio…';
-      const blob=await fetchPremiumAudio(seg.text);
+      const blob=await fetchPremiumAudio(seg.text, voice);
       if(!isPlaying) return; // stopped while loading
       objectUrl=URL.createObjectURL(blob);
       premiumCache.set(cacheKey, objectUrl);
@@ -678,6 +722,7 @@ async function playPremiumFromChunk(idx){
     await premiumAudio.play();
     playBtn.textContent='❚❚';
     updateMediaSession();
+    if(currentSegmentIdx===0) prefetchNextPage(); // kick off in the background, don't await
   }catch(e){
     statusEl.textContent=e.message || 'Premium voice failed — try the standard voice.';
     stopSpeaking();
