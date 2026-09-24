@@ -364,7 +364,7 @@ const WPS_BASE=2.3; // words per second baseline for duration estimate
 // ---- Premium (paid) voice config ----
 // This is your deployed Worker's base URL from `wrangler deploy` — no
 // trailing slash. The app calls {base}/speak and {base}/redeem-topup.
-const PREMIUM_TTS_BASE='https://readloud-tts-proxy.YOUR-SUBDOMAIN.workers.dev';
+const PREMIUM_TTS_BASE='https://readloud-tts-proxy.tayooni2016.workers.dev';
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 // Caches generated audio per page+segment+voice so switching back to a
