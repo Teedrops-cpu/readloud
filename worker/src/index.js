@@ -20,6 +20,7 @@ function corsHeaders(request, env) {
     'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0] || '',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Expose-Headers': 'X-Chars-Remaining',
     'Vary': 'Origin',
   };
 }
@@ -236,6 +237,30 @@ async function handleRedeemTopup(request, env, cors) {
   return json({ ok: true, charsRemaining: account.charsRemaining }, 200, cors);
 }
 
+// Returns the account's remaining characters without generating audio.
+// Doesn't bind a device (only real use does), but won't reveal a balance to
+// a device other than the bound one.
+async function handleBalance(request, env, cors) {
+  let body;
+  try { body = await request.json(); } catch (e) {
+    return json({ error: 'invalid JSON body' }, 400, cors);
+  }
+  const licenseKey = typeof body.licenseKey === 'string' ? body.licenseKey.trim() : '';
+  const deviceId = cleanDeviceId(body.deviceId);
+  if (!licenseKey || !deviceId) return json({ error: 'licenseKey and deviceId are required' }, 400, cors);
+
+  const account = await getBalance(env, licenseKey);
+  if (!account) {
+    // Bought but never used yet: confirm it's real, report the full pack.
+    const check = await verifyGumroadLicense(env.GUMROAD_BASE_PRODUCT_ID, licenseKey);
+    if (!check.valid) return json({ error: 'invalid or inactive license key' }, 401, cors);
+    return json({ charsRemaining: Number(env.BASE_PACK_CHARS || 0) }, 200, cors);
+  }
+  if (!(await ensureStillValid(env, licenseKey, account))) return revokedResponse(cors);
+  if (account.deviceId && account.deviceId !== deviceId) return deviceMismatch(cors);
+  return json({ charsRemaining: account.charsRemaining }, 200, cors);
+}
+
 // Moves a license to the calling device. Rate-limited: after a move, the
 // license can't be moved again for TRANSFER_COOLDOWN_DAYS. A real owner
 // switching phones or clearing their browser is unaffected; two people
@@ -295,6 +320,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/redeem-topup') return handleRedeemTopup(request, env, cors);
     if (url.pathname === '/transfer-device') return handleTransferDevice(request, env, cors);
+    if (url.pathname === '/balance') return handleBalance(request, env, cors);
     return handleSpeak(request, env, cors); // default route: /speak (and /)
   },
 };
