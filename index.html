@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Readloud — your PDF, read aloud</title>
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#2f5d50">
@@ -231,6 +232,40 @@
   .install-help .install-step{ margin:0 0 10px; padding:8px 10px; border-radius:4px; }
   .install-help .install-step.match{ background:var(--pine-soft); }
   .install-help #installNowBtn{ margin:0 0 12px; min-height:44px; }
+  /* ---------- touch-friendly on every device ---------- */
+  body{
+    padding-top:env(safe-area-inset-top, 0px); padding-bottom:env(safe-area-inset-bottom, 0px);
+    padding-left:env(safe-area-inset-left, 0px); padding-right:env(safe-area-inset-right, 0px);
+  }
+  button, select, input[type=text]{ min-height:44px; }
+  button.secondary, .chapter-row button{ padding:10px 18px; font-size:0.9rem; }
+  #resumeBanner button{ min-height:44px; padding:10px 16px; font-size:0.85rem; }
+  select, .chapter-row select{ font-size:16px; padding:8px 10px; } /* 16px stops iPhone auto-zoom on tap */
+  .field{
+    flex:1; min-width:0; box-sizing:border-box; font-family:inherit; font-size:16px;
+    padding:10px 12px; border-radius:6px; border:1px solid var(--rule);
+    background:var(--surface); color:var(--ink);
+  }
+  input[type=range]{ min-height:44px; flex:1; min-width:120px; }
+  .buy-links a{ display:inline-flex; align-items:center; min-height:44px; }
+
+  @media (max-width:560px){
+    header{ padding:20px 16px 16px; }
+    h1{ font-size:1.5rem; }
+    main{ padding:16px 14px 64px; }
+    #dropzone{ padding:28px 16px; }
+    #textview{ max-height:50vh; font-size:1.05rem; padding:16px; }
+    .controls{ gap:12px; }
+    button.seek{ width:52px; height:52px; font-size:0.8rem; }
+    button.transport{ width:64px; height:64px; font-size:1.4rem; }
+    .controls button.secondary{ flex:1; }
+    .row{ flex-direction:column; align-items:stretch; gap:10px; }
+    .row .rate-label{ width:100%; justify-content:space-between; }
+    .row select{ width:100%; max-width:none; }
+    .chapter-row{ flex-direction:column; align-items:stretch; }
+    .chapter-row button{ width:100%; }
+    #resumeBanner{ flex-direction:column; align-items:stretch; }
+  }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -318,18 +353,18 @@
 
     <div id="licenseBox" style="display:none;">
       <div class="chapter-row">
-        <input type="text" id="licenseKeyInput" placeholder="Paste your Readloud license key" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
-        <button class="secondary" id="activateLicenseBtn" style="padding:6px 12px;font-size:0.78rem;">Activate</button>
+        <input type="text" id="licenseKeyInput" placeholder="Paste your Readloud license key" class="field">
+        <button class="secondary" id="activateLicenseBtn">Activate</button>
       </div>
       <div id="licenseStatus" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.75rem;color:var(--muted);margin:4px 0 10px;"></div>
-      <button class="secondary" id="transferBtn" style="display:none;padding:6px 12px;font-size:0.78rem;margin-bottom:10px;">Move license to this device</button>
+      <button class="secondary" id="transferBtn" style="display:none;margin-bottom:10px;">Move license to this device</button>
       <div class="buy-links">
         <a id="buyBaseLink" href="https://3727444590698.gumroad.com/l/omqol" target="_blank" rel="noopener">Get Premium: $12.99, includes about 100 pages</a>
         <a id="buyTopupLink" href="https://3727444590698.gumroad.com/l/vbboeu" target="_blank" rel="noopener" style="display:none;">Need more pages? Buy a top-up: $5.99 for about 50</a>
       </div>
       <div class="chapter-row" id="topupBox" style="display:none;">
-        <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
-        <button class="secondary" id="redeemTopupBtn" style="padding:6px 12px;font-size:0.78rem;">Redeem</button>
+        <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" class="field">
+        <button class="secondary" id="redeemTopupBtn">Redeem</button>
       </div>
     </div>
 
