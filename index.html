@@ -221,6 +221,16 @@
   }
   .buy-links a{ color:var(--pine); text-decoration:underline; text-underline-offset:3px; }
   .buy-links a:hover{ color:var(--pine-deep); }
+  .install-help{
+    margin-top:28px; border:1px solid var(--rule); border-radius:6px;
+    background:var(--surface); padding:4px 16px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:0.85rem; line-height:1.55;
+  }
+  .install-help summary{ cursor:pointer; font-weight:600; color:var(--pine); padding:12px 0; }
+  .install-help .install-lead{ margin:0 0 10px; color:var(--muted); }
+  .install-help .install-step{ margin:0 0 10px; padding:8px 10px; border-radius:4px; }
+  .install-help .install-step.match{ background:var(--pine-soft); }
+  .install-help #installNowBtn{ margin:0 0 12px; min-height:44px; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -337,6 +347,18 @@
       <span id="sleepCountdown"></span>
     </div>
   </div>
+
+  <details id="installHelp" class="install-help">
+    <summary>Install Readloud as an app</summary>
+    <p class="install-lead">Get its own icon, a full-screen window, and the free voice offline.</p>
+    <button type="button" class="secondary" id="installNowBtn" hidden>Install now</button>
+    <div id="installSteps">
+      <p class="install-step" data-platform="android"><strong>Android (Chrome):</strong> tap &#8942;, then <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</p>
+      <p class="install-step" data-platform="ios"><strong>iPhone or iPad (Safari):</strong> tap <strong>Share</strong> (inside &bull;&bull;&bull; on some layouts), then <strong>Add to Home Screen</strong>. Keep <strong>Open as Web App</strong> on, then tap <strong>Add</strong>. Using Premium? Open the installed app and tap <strong>Move license to this device</strong> once.</p>
+      <p class="install-step" data-platform="desktop"><strong>Windows or Mac (Chrome or Edge):</strong> click the install icon at the right of the address bar. Or in Chrome: &#8942; &rarr; <strong>Cast, save, and share</strong> &rarr; <strong>Install page as app</strong>. In Edge: &bull;&bull;&bull; &rarr; <strong>Apps</strong> &rarr; <strong>Install this site as an app</strong>.</p>
+      <p class="install-step" data-platform="mac-safari"><strong>Mac (Safari):</strong> open the Share menu and choose <strong>Add to Dock</strong>.</p>
+    </div>
+  </details>
 </main>
 
 <footer>Built with pdf.js + your browser's speech engine. Works offline once loaded.</footer>
@@ -1022,6 +1044,39 @@ function setSleepTimer(minutes){
   }, 1000);
 }
 sleepSelect.addEventListener('change',()=>setSleepTimer(parseInt(sleepSelect.value,10)));
+
+// ---------- Install help panel ----------
+(function setupInstallHelp(){
+  const panel=document.getElementById('installHelp');
+  const btn=document.getElementById('installNowBtn');
+  const steps=document.getElementById('installSteps');
+  const standalone=(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone===true;
+  if(standalone){ panel.hidden=true; return; } // already installed
+
+  const ua=navigator.userAgent;
+  const isIOS=/iPad|iPhone|iPod/.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  const isAndroid=/Android/.test(ua);
+  const isMacSafari=/Macintosh/.test(ua) && /Safari/.test(ua) && !/Chrome|Chromium|Edg\//.test(ua) && !isIOS;
+  const platform=isIOS?'ios':isAndroid?'android':isMacSafari?'mac-safari':'desktop';
+  const match=steps.querySelector('[data-platform="'+platform+'"]');
+  if(match){ match.classList.add('match'); steps.insertBefore(match, steps.firstChild); }
+
+  // Chrome and Edge offer a real install prompt; show a one-tap button for it.
+  let deferredPrompt=null;
+  window.addEventListener('beforeinstallprompt', (e)=>{
+    e.preventDefault();
+    deferredPrompt=e;
+    btn.hidden=false;
+  });
+  btn.addEventListener('click', async ()=>{
+    if(!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try{ await deferredPrompt.userChoice; }catch(e){}
+    deferredPrompt=null;
+    btn.hidden=true;
+  });
+  window.addEventListener('appinstalled', ()=>{ panel.hidden=true; });
+})();
 
 // ---------- PWA: register the service worker for offline install ----------
 if('serviceWorker' in navigator){
