@@ -396,7 +396,7 @@
   </details>
 </main>
 
-<footer>Built with pdf.js + your browser's speech engine. Works offline once loaded.</footer>
+<footer>&copy; 2026 Readloud</footer>
 
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -670,10 +670,20 @@ function stopSpeaking(){
   document.body.classList.remove('is-playing');
 }
 
+// Keeps the current sentence centred inside the reading box only.
+// (scrollIntoView would also scroll the whole page, yanking it back up
+// to the text while someone is using the controls below.)
+function scrollWithinTextview(el){
+  const box=textview.getBoundingClientRect();
+  const r=el.getBoundingClientRect();
+  const target=textview.scrollTop + (r.top - box.top) - (textview.clientHeight - r.height)/2;
+  textview.scrollTo({top:Math.max(0,target), behavior:'smooth'});
+}
+
 function highlightSentence(idx){
   document.querySelectorAll('#textview .sent').forEach((el,i)=>{
     el.classList.toggle('said', i<idx);
-    if(i===idx){ el.innerHTML=`<mark>${sentences[i].replace(/</g,'&lt;')}</mark>`; el.scrollIntoView({block:'center',behavior:'smooth'}); }
+    if(i===idx){ el.innerHTML=`<mark>${sentences[i].replace(/</g,'&lt;')}</mark>`; scrollWithinTextview(el); }
     else if(i!==idx){ el.innerHTML=sentences[i].replace(/</g,'&lt;'); }
   });
 }
