@@ -266,6 +266,20 @@
     .chapter-row button{ width:100%; }
     #resumeBanner{ flex-direction:column; align-items:stretch; }
   }
+  .audio-cache-row{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:0.8rem;
+    color:var(--muted); margin:0 0 12px;
+  }
+  .audio-cache-row[hidden]{ display:none; }
+  .balance-line{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:0.9rem;
+    margin:0 0 12px; padding:10px 12px; border-radius:6px; background:var(--pine-soft); color:var(--ink);
+  }
+  .balance-line.low{ background:#f6e7cf; color:#5a3d12; }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .balance-line.low{ background:#3a2e1c; color:#f1d9b0; } }
+  :root[data-theme="dark"] .balance-line.low{ background:#3a2e1c; color:#f1d9b0; }
+  .balance-line[hidden]{ display:none; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -357,7 +371,12 @@
         <button class="secondary" id="activateLicenseBtn">Activate</button>
       </div>
       <div id="licenseStatus" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.75rem;color:var(--muted);margin:4px 0 10px;"></div>
+      <p id="balanceLine" class="balance-line" hidden></p>
       <button class="secondary" id="transferBtn" style="display:none;margin-bottom:10px;">Move license to this device</button>
+      <div class="audio-cache-row" id="audioCacheRow" hidden>
+        <span>Saved audio on this device: <strong id="audioCacheSize">0 MB</strong></span>
+        <button type="button" class="secondary" id="clearAudioBtn">Clear</button>
+      </div>
       <div class="buy-links">
         <a id="buyBaseLink" href="https://3727444590698.gumroad.com/l/omqol" target="_blank" rel="noopener">Get Premium: $12.99, includes about 100 pages</a>
         <a id="buyTopupLink" href="https://3727444590698.gumroad.com/l/vbboeu" target="_blank" rel="noopener" style="display:none;">Need more pages? Buy a top-up: $5.99 for about 50</a>
@@ -454,14 +473,123 @@ const deviceId=getDeviceId();
 
 // ---------- IndexedDB (tiny wrapper) ----------
 const DB_NAME='readloudDB', STORE='session';
+// v2 adds 'audio' (generated premium audio) and 'audioMeta' (its size
+// and last-played time). Existing saved sessions carry over untouched.
+let dbPromise=null;
 function idbOpen(){
+  if(dbPromise) return dbPromise;
+  dbPromise=new Promise((res,rej)=>{
+    const req=indexedDB.open(DB_NAME,2);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if(!db.objectStoreNames.contains('audio')) db.createObjectStore('audio');
+      if(!db.objectStoreNames.contains('audioMeta')) db.createObjectStore('audioMeta');
+    };
+    req.onsuccess=()=>{
+      const db=req.result;
+      db.onversionchange=()=>{ db.close(); dbPromise=null; }; // let a newer tab upgrade
+      res(db);
+    };
+    req.onerror=()=>{ dbPromise=null; rej(req.error); };
+  });
+  return dbPromise;
+}
+
+// ---- saved premium audio (start) ----
+// Generated premium audio is kept on this device so replaying a page, going
+// back, or resuming tomorrow costs nothing. Matched by the text itself, so
+// identical passages share one copy. Lean by design: capped in size, unused
+// audio expires, and the customer can clear it.
+const AUDIO_CACHE_MAX_BYTES=150*1024*1024;
+const AUDIO_MAX_AGE_MS=30*24*60*60*1000;
+function hashText(str){
+  let h1=0xdeadbeef, h2=0x41c6ce57;
+  for(let i=0;i<str.length;i++){
+    const ch=str.charCodeAt(i);
+    h1=Math.imul(h1^ch,2654435761); h2=Math.imul(h2^ch,1597334677);
+  }
+  h1=Math.imul(h1^(h1>>>16),2246822507); h1^=Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507); h2^=Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);
+}
+function audioKey(text, voice){ return 'v1|'+voice+'|'+text.length+'|'+hashText(text); }
+
+function idbRequest(req){
+  return new Promise((res,rej)=>{ req.onsuccess=()=>res(req.result); req.onerror=()=>rej(req.error); });
+}
+async function audioStoreGet(key){
+  try{
+    const db=await idbOpen();
+    const blob=await idbRequest(db.transaction('audio','readonly').objectStore('audio').get(key));
+    if(!blob) return null;
+    // Mark as recently played so the size cap removes older audio first.
+    db.transaction('audioMeta','readwrite').objectStore('audioMeta').put({size:blob.size, lastUsed:Date.now()}, key);
+    return blob;
+  }catch(e){ return null; }
+}
+async function readAudioMeta(){
+  const db=await idbOpen();
   return new Promise((res,rej)=>{
-    const req=indexedDB.open(DB_NAME,1);
-    req.onupgradeneeded=()=>req.result.createObjectStore(STORE);
-    req.onsuccess=()=>res(req.result);
-    req.onerror=()=>rej(req.error);
+    const out=[];
+    const cur=db.transaction('audioMeta','readonly').objectStore('audioMeta').openCursor();
+    cur.onsuccess=()=>{ const c=cur.result; if(c){ out.push({key:c.key, size:c.value.size||0, lastUsed:c.value.lastUsed||0}); c.continue(); } else res(out); };
+    cur.onerror=()=>rej(cur.error);
   });
 }
+async function deleteAudioKeys(keys){
+  if(!keys.length) return;
+  const db=await idbOpen();
+  await new Promise((res,rej)=>{
+    const tx=db.transaction(['audio','audioMeta'],'readwrite');
+    keys.forEach(k=>{ tx.objectStore('audio').delete(k); tx.objectStore('audioMeta').delete(k); });
+    tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+  });
+}
+// Removes audio unplayed for 30 days, then the least recently played until
+// the total fits the cap. Returns the bytes still stored.
+async function pruneAudio(){
+  const entries=await readAudioMeta();
+  const now=Date.now();
+  let total=entries.reduce((a,e)=>a+e.size,0);
+  entries.sort((a,b)=>a.lastUsed-b.lastUsed);
+  const doomed=[];
+  for(const e of entries){
+    if(now-e.lastUsed>AUDIO_MAX_AGE_MS || total>AUDIO_CACHE_MAX_BYTES){ doomed.push(e.key); total-=e.size; }
+  }
+  await deleteAudioKeys(doomed);
+  return total;
+}
+let persistRequested=false;
+async function audioStorePut(key, blob){
+  try{
+    const db=await idbOpen();
+    await new Promise((res,rej)=>{
+      const tx=db.transaction(['audio','audioMeta'],'readwrite');
+      tx.objectStore('audio').put(blob, key);
+      tx.objectStore('audioMeta').put({size:blob.size, lastUsed:Date.now()}, key);
+      tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error);
+    });
+    await pruneAudio();
+    // Installed apps can ask the browser not to clear this storage.
+    const installed=(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone===true;
+    if(installed && !persistRequested && navigator.storage && navigator.storage.persist){
+      persistRequested=true; navigator.storage.persist().catch(()=>{});
+    }
+  }catch(e){
+    // Device full or storage unavailable: skip saving, playback is unaffected.
+  }
+  refreshAudioUsage();
+}
+async function clearSavedAudio(){
+  const db=await idbOpen();
+  await new Promise((res,rej)=>{
+    const tx=db.transaction(['audio','audioMeta'],'readwrite');
+    tx.objectStore('audio').clear(); tx.objectStore('audioMeta').clear();
+    tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);
+  });
+}
+// ---- saved premium audio (end) ----
 async function idbSet(key,val){
   const db=await idbOpen();
   return new Promise((res,rej)=>{
@@ -757,6 +885,8 @@ async function fetchPremiumAudio(text, voiceOverride){
     err.code=code;
     throw err;
   }
+  const left=res.headers.get('X-Chars-Remaining');
+  if(left!==null) showBalance(Number(left));
   return res.blob();
 }
 
@@ -782,7 +912,12 @@ async function prefetchNextPage(){
     if(!segs.length) return;
     const cacheKey=`${nextPageNum}:0:${voice}`;
     if(premiumCache.has(cacheKey)) return;
-    const blob=await fetchPremiumAudio(segs[0].text, voice);
+    const key=audioKey(segs[0].text, voice);
+    let blob=await audioStoreGet(key);
+    if(!blob){
+      blob=await fetchPremiumAudio(segs[0].text, voice);
+      audioStorePut(key, blob);
+    }
     const url=URL.createObjectURL(blob);
     premiumCache.set(cacheKey, url);
   }catch(e){
@@ -815,8 +950,13 @@ async function playPremiumFromChunk(idx){
       // Already generated this exact page+segment+voice before — free replay.
       statusEl.textContent='';
     } else {
-      statusEl.textContent='Loading premium audio…';
-      const blob=await fetchPremiumAudio(seg.text, voice);
+      const key=audioKey(seg.text, voice);
+      let blob=await audioStoreGet(key); // saved on this device earlier? free
+      if(!blob){
+        statusEl.textContent='Loading premium audio…';
+        blob=await fetchPremiumAudio(seg.text, voice);
+        audioStorePut(key, blob); // save for next time, in the background
+      }
       if(!isPlaying) return; // stopped while loading
       objectUrl=URL.createObjectURL(blob);
       premiumCache.set(cacheKey, objectUrl);
@@ -961,15 +1101,45 @@ transferBtn.addEventListener('click', async ()=>{
 });
 
 const buyBaseLink=document.getElementById('buyBaseLink'), buyTopupLink=document.getElementById('buyTopupLink');
+// ~2,500 characters is an average page; the balance itself is in characters.
+const CHARS_PER_PAGE=2500, LOW_BALANCE_PAGES=10;
+const balanceLine=document.getElementById('balanceLine');
+function showBalance(chars){
+  if(!Number.isFinite(chars)) return;
+  const pages=Math.max(0, Math.floor(chars/CHARS_PER_PAGE));
+  const low=pages<LOW_BALANCE_PAGES;
+  balanceLine.textContent = pages===0
+    ? 'Your premium narration has run out. A top-up adds about 50 pages.'
+    : low
+      ? 'About '+pages+' page'+(pages===1?'':'s')+' of premium narration left. Running low: a top-up adds about 50 pages.'
+      : 'About '+pages+' pages of premium narration left.';
+  balanceLine.classList.toggle('low', low);
+  balanceLine.hidden=false;
+}
+async function refreshBalance(){
+  if(!licenseKey) { balanceLine.hidden=true; return; }
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/balance`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({licenseKey, deviceId}),
+    });
+    const data=await res.json().catch(()=>({}));
+    if(res.ok) showBalance(data.charsRemaining);
+    else if(data.code==='device_mismatch') showTransferOption(licenseKey, data.error);
+  }catch(e){ /* offline: keep showing the last known balance */ }
+}
+
 function renderLicenseStatus(){
   if(licenseKey){
     licenseKeyInput.value=licenseKey;
-    licenseStatus.textContent='Premium activated. Balance updates after your next play.';
+    licenseStatus.textContent='Premium activated. Pages you have already played are saved on this device and replay for free.';
+    refreshBalance();
     topupBox.style.display='flex';
     buyBaseLink.style.display='none';
     buyTopupLink.style.display='';
   } else {
     licenseStatus.textContent='Enter your Base Pack license key (from your Gumroad receipt) to activate premium voice.';
+    balanceLine.hidden=true;
     topupBox.style.display='none';
     buyBaseLink.style.display='';
     buyTopupLink.style.display='none';
@@ -1019,7 +1189,8 @@ redeemTopupBtn.addEventListener('click', async ()=>{
       if(data.code==='device_mismatch'){ showTransferOption(licenseKey, data.error); return; }
       throw new Error(data.error||'Redeem failed.');
     }
-    licenseStatus.textContent=`Added! New balance: ~${Math.round(data.charsRemaining/2500)} pages.`;
+    licenseStatus.textContent='Top-up added.';
+    showBalance(data.charsRemaining);
     topupKeyInput.value='';
   }catch(e){
     licenseStatus.textContent=e.message || 'Could not redeem that code.';
@@ -1089,6 +1260,25 @@ function setSleepTimer(minutes){
   }, 1000);
 }
 sleepSelect.addEventListener('change',()=>setSleepTimer(parseInt(sleepSelect.value,10)));
+
+// ---------- Saved audio: size readout, Clear, startup cleanup ----------
+const audioCacheRow=document.getElementById('audioCacheRow');
+const audioCacheSize=document.getElementById('audioCacheSize');
+const clearAudioBtn=document.getElementById('clearAudioBtn');
+async function refreshAudioUsage(){
+  try{
+    const entries=await readAudioMeta();
+    const bytes=entries.reduce((a,e)=>a+e.size,0);
+    audioCacheSize.textContent=(bytes/1048576).toFixed(bytes<10485760?1:0)+' MB';
+    audioCacheRow.hidden=bytes===0;
+  }catch(e){ audioCacheRow.hidden=true; }
+}
+clearAudioBtn.addEventListener('click', async ()=>{
+  if(!confirm('Remove saved premium audio from this device? Pages you play again will be generated again and use page credit.')) return;
+  try{ await clearSavedAudio(); }catch(e){}
+  refreshAudioUsage();
+});
+pruneAudio().catch(()=>{}).finally(refreshAudioUsage);
 
 // ---------- Install help panel ----------
 (function setupInstallHelp(){
