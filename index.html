@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Readloud — your PDF, read aloud</title>
 <link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#2f5d50">
+<meta name="theme-color" content="#17181a">
+<script data-theme-boot>
+(function(){
+  var t='dark';
+  try{ t=localStorage.getItem('readloud_theme')||'dark'; }catch(e){}
+  if(t!=='auto') document.documentElement.setAttribute('data-theme', t);
+  var dark=t==='dark' || (t==='auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  var m=document.querySelector('meta[name="theme-color"]');
+  if(m) m.setAttribute('content', dark ? '#17181a' : '#2f5d50');
+})();
+</script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -25,6 +35,8 @@
     --amber:#b8894a;
     --muted:#6b6558;
     --surface:#fffefb;
+    --on-pine:#ffffff;
+    --on-amber:#211f1a;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark){
@@ -39,6 +51,8 @@
       --amber:#d1a668;
       --muted:#a39c8c;
       --surface:#1f201d;
+      --on-pine:#0f1f1a;
+      --on-amber:#17181a;
       color-scheme: dark;
     }
   }
@@ -53,6 +67,8 @@
     --amber:#d1a668;
     --muted:#a39c8c;
     --surface:#1f201d;
+    --on-pine:#0f1f1a;
+    --on-amber:#17181a;
     color-scheme: dark;
   }
   *{box-sizing:border-box;}
@@ -122,7 +138,7 @@
   #resumeBanner button{
     border:none;border-radius:18px;padding:7px 14px;font-size:0.8rem;cursor:pointer;
   }
-  #resumeYes{background:var(--pine);color:#fff;}
+  #resumeYes{background:var(--pine);color:var(--on-pine);}
   #resumeNo{background:transparent;color:var(--muted);}
 
   #dropzone{
@@ -177,7 +193,7 @@
     background:var(--surface);border:1px solid var(--rule);border-radius:4px;
     padding:22px;max-height:280px;overflow-y:auto;line-height:1.8;font-size:1rem;
   }
-  #textview mark{background:var(--amber);color:#fff;border-radius:2px;padding:0 1px;}
+  #textview mark{background:var(--amber);color:var(--on-amber);border-radius:2px;padding:0 1px;}
   #textview .said{color:var(--muted);}
 
   .controls{
@@ -186,7 +202,7 @@
   }
   button.transport{
     width:52px;height:52px;border-radius:50%;border:none;background:var(--pine);
-    color:#fff;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;
+    color:var(--on-pine);font-size:1.2rem;cursor:pointer;display:flex;align-items:center;
     justify-content:center;transition:transform .1s,background .2s;
   }
   button.transport:hover{background:var(--pine-deep);}
@@ -280,6 +296,15 @@
   @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .balance-line.low{ background:#3a2e1c; color:#f1d9b0; } }
   :root[data-theme="dark"] .balance-line.low{ background:#3a2e1c; color:#f1d9b0; }
   .balance-line[hidden]{ display:none; }
+  .theme-switch{
+    display:inline-flex; gap:2px; padding:3px; border:1px solid var(--rule); border-radius:999px;
+    background:var(--surface); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  .theme-switch button{
+    border:none; background:transparent; color:var(--muted); border-radius:999px;
+    padding:0 16px; font-size:0.85rem; cursor:pointer;
+  }
+  .theme-switch button[aria-pressed="true"]{ background:var(--pine); color:var(--on-pine); font-weight:600; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -294,6 +319,11 @@
   </div>
   <h1>Readloud</h1>
   <div class="tagline">Drop in a PDF and it reads itself to you, right here in your browser. Free to use, no sign-up needed.</div>
+  <div class="theme-switch" role="group" aria-label="Colour theme">
+    <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+    <button type="button" data-theme-choice="dark" aria-pressed="true">Dark</button>
+    <button type="button" data-theme-choice="auto" aria-pressed="false">Auto</button>
+  </div>
 </header>
 
 <main>
@@ -1279,6 +1309,29 @@ clearAudioBtn.addEventListener('click', async ()=>{
   refreshAudioUsage();
 });
 pruneAudio().catch(()=>{}).finally(refreshAudioUsage);
+
+// ---------- Theme switch: Light / Dark / Auto (Dark by default) ----------
+(function setupTheme(){
+  const meta=document.querySelector('meta[name="theme-color"]');
+  const btns=document.querySelectorAll('[data-theme-choice]');
+  const mq=window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  let current='dark';
+  try{ current=localStorage.getItem('readloud_theme')||'dark'; }catch(e){}
+  function apply(choice){
+    const root=document.documentElement;
+    if(choice==='auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', choice);
+    const dark=choice==='dark' || (choice==='auto' && mq && mq.matches);
+    if(meta) meta.setAttribute('content', dark ? '#17181a' : '#2f5d50');
+    btns.forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.themeChoice===choice)));
+  }
+  apply(current);
+  btns.forEach(b=>b.addEventListener('click', ()=>{
+    current=b.dataset.themeChoice;
+    try{ localStorage.setItem('readloud_theme', current); }catch(e){}
+    apply(current);
+  }));
+  if(mq && mq.addEventListener) mq.addEventListener('change', ()=>{ if(current==='auto') apply('auto'); });
+})();
 
 // ---------- Install help panel ----------
 (function setupInstallHelp(){
