@@ -215,6 +215,12 @@
   }
   .rate-label{white-space:nowrap;display:flex;align-items:center;gap:6px;}
 
+  .buy-links{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:0.8rem; margin:0 0 14px;
+  }
+  .buy-links a{ color:var(--pine); text-decoration:underline; text-underline-offset:3px; }
+  .buy-links a:hover{ color:var(--pine-deep); }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -307,6 +313,10 @@
       </div>
       <div id="licenseStatus" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.75rem;color:var(--muted);margin:4px 0 10px;"></div>
       <button class="secondary" id="transferBtn" style="display:none;padding:6px 12px;font-size:0.78rem;margin-bottom:10px;">Move license to this device</button>
+      <div class="buy-links">
+        <a id="buyBaseLink" href="https://3727444590698.gumroad.com/l/omqol" target="_blank" rel="noopener">Get Premium: $12.99, includes about 100 pages</a>
+        <a id="buyTopupLink" href="https://3727444590698.gumroad.com/l/vbboeu" target="_blank" rel="noopener" style="display:none;">Need more pages? Buy a top-up: $5.99 for about 50</a>
+      </div>
       <div class="chapter-row" id="topupBox" style="display:none;">
         <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" style="flex:1;min-width:140px;font-family:inherit;font-size:0.8rem;padding:6px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);">
         <button class="secondary" id="redeemTopupBtn" style="padding:6px 12px;font-size:0.78rem;">Redeem</button>
@@ -756,6 +766,7 @@ async function playPremiumFromChunk(idx){
   }catch(e){
     statusEl.textContent=e.message || 'Premium voice failed — try the standard voice.';
     if(e.code==='device_mismatch') showTransferOption(licenseKey, e.message);
+    if(e.status===402){ licenseBox.style.display='block'; renderLicenseStatus(); licenseStatus.textContent=e.message; }
     stopSpeaking();
   }
 }
@@ -882,14 +893,19 @@ transferBtn.addEventListener('click', async ()=>{
   }
 });
 
+const buyBaseLink=document.getElementById('buyBaseLink'), buyTopupLink=document.getElementById('buyTopupLink');
 function renderLicenseStatus(){
   if(licenseKey){
     licenseKeyInput.value=licenseKey;
     licenseStatus.textContent='Premium activated. Balance updates after your next play.';
     topupBox.style.display='flex';
+    buyBaseLink.style.display='none';
+    buyTopupLink.style.display='';
   } else {
     licenseStatus.textContent='Enter your Base Pack license key (from your Gumroad receipt) to activate premium voice.';
     topupBox.style.display='none';
+    buyBaseLink.style.display='';
+    buyTopupLink.style.display='none';
   }
 }
 
