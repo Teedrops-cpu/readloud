@@ -5,6 +5,7 @@ compatibility_date = "2026-09-01"
 [vars]
 ALLOWED_ORIGINS = "https://readloud.tayooni2016.workers.dev,http://localhost:8000"
 DAILY_CHAR_LIMIT = "150000"
+NGN_PER_USD = "1400"
 
 # Gumroad product IDs (safe/public — not secrets, visible in your product URLs)
 GUMROAD_BASE_PRODUCT_ID = "H60_kGRdDn0eVKx9ocAmtQ=="
