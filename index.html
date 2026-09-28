@@ -305,6 +305,46 @@
     padding:0 16px; font-size:0.85rem; cursor:pointer;
   }
   .theme-switch button[aria-pressed="true"]{ background:var(--pine); color:var(--on-pine); font-weight:600; }
+  .survey{
+    margin:4px 0 18px; padding:16px; border:1px solid var(--rule); border-radius:8px; background:var(--surface);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:0.9rem; line-height:1.5;
+  }
+  .survey[hidden]{ display:none; }
+  .survey h2{ font-family:"Iowan Old Style",Georgia,serif; font-size:1.2rem; margin:0 0 6px; }
+  .survey-lead{ margin:0 0 6px; color:var(--muted); }
+  .survey-perks{ margin:0 0 12px; padding-left:20px; }
+  .survey-perks li{ margin:2px 0; }
+  .survey fieldset{ border:none; padding:0; margin:18px 0 0; }
+  .survey legend{ font-weight:600; padding:0; margin:0 0 6px; }
+  .survey .choice{
+    display:flex; align-items:center; gap:10px; min-height:44px; padding:0 12px; margin:0 0 6px;
+    border:1px solid var(--rule); border-radius:6px; cursor:pointer;
+  }
+  .survey .choice:has(input:checked){ border-color:var(--pine); background:var(--pine-soft); }
+  .survey .choice input{ width:18px; height:18px; min-height:0; margin:0; accent-color:var(--pine); }
+  .survey-field{ display:block; margin:16px 0 6px; font-weight:600; }
+  .survey .optional{ font-weight:400; color:var(--muted); }
+  .survey textarea.field{ width:100%; resize:vertical; min-height:72px; }
+  .survey input[type=email].field{ width:100%; min-height:44px; }
+  .transport-wide{
+    display:block; width:100%; min-height:48px; margin:18px 0 0; border:none; border-radius:999px;
+    background:var(--pine); color:var(--on-pine); font-size:1rem; font-weight:600; cursor:pointer;
+  }
+  .transport-wide:disabled{ opacity:0.6; cursor:default; }
+  .survey-status{ margin:10px 0 0; min-height:1.2em; color:var(--muted); }
+  .survey-thanks{ margin:16px 0 10px; font-weight:600; }
+  .link-button{
+    display:block; margin:14px 0 0; padding:0; min-height:44px; border:none; background:none;
+    color:var(--pine); text-decoration:underline; text-underline-offset:3px; font-size:0.85rem; cursor:pointer;
+  }
+  .currency-switch{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 10px; color:var(--muted); font-size:0.85rem; }
+  .currency-switch button{
+    min-height:36px; padding:0 14px; border:1px solid var(--rule); border-radius:999px;
+    background:transparent; color:var(--ink); font-size:0.85rem; cursor:pointer;
+  }
+  .currency-switch button[aria-pressed="true"]{ background:var(--pine); border-color:var(--pine); color:var(--on-pine); font-weight:600; }
+  .currency-note{ margin:4px 0 0; color:var(--muted); font-size:0.8rem; }
+  .currency-note[hidden]{ display:none; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -395,6 +435,60 @@
       <span style="font-size:0.75rem;">Uses a small amount of paid credit per page. To create the audio, the page text is sent to our voice service (OpenAI). Readloud doesn't store it.</span>
     </div>
 
+    <section id="surveyBox" class="survey" hidden aria-labelledby="surveyTitle">
+      <h2 id="surveyTitle">Premium voices are coming soon</h2>
+      <p class="survey-lead">Help set a fair price. Premium will include:</p>
+      <ul class="survey-perks">
+        <li>Six natural, human-sounding voices</li>
+        <li>About 100 pages, or 4 to 5 hours of listening</li>
+        <li>Pages you've heard replay free, even offline</li>
+        <li>Keeps playing on your lock screen (most phones)</li>
+        <li>Precise skip back and forward</li>
+      </ul>
+      <button type="button" class="secondary" id="sampleBtn">Hear a sample of the selected voice</button>
+
+      <form id="surveyForm" novalidate>
+        <fieldset>
+          <legend>What would you pay once for about 100 pages?</legend>
+          <div class="currency-switch" role="group" aria-label="Show prices in">
+            <span>Show prices in</span>
+            <button type="button" data-currency="NGN" aria-pressed="false">₦ Naira</button>
+            <button type="button" data-currency="USD" aria-pressed="true">$ Dollars</button>
+          </div>
+          <label class="choice"><input type="radio" name="price" value="free"> Nothing, the free voice is enough</label>
+          <label class="choice"><input type="radio" name="price" value="lt3"> <span data-price-label="lt3">Under $3</span></label>
+          <label class="choice"><input type="radio" name="price" value="3to6"> <span data-price-label="3to6">$3 to $6</span></label>
+          <label class="choice"><input type="radio" name="price" value="6to10"> <span data-price-label="6to10">$6 to $10</span></label>
+          <label class="choice"><input type="radio" name="price" value="10to15"> <span data-price-label="10to15">$10 to $15</span></label>
+          <label class="choice"><input type="radio" name="price" value="gt15"> <span data-price-label="gt15">Over $15</span></label>
+          <p class="currency-note" id="currencyNote" hidden></p>
+        </fieldset>
+        <fieldset>
+          <legend>How much do you read?</legend>
+          <label class="choice"><input type="radio" name="reading" value="light"> A few pages a week</label>
+          <label class="choice"><input type="radio" name="reading" value="book"> About a book a month</label>
+          <label class="choice"><input type="radio" name="reading" value="heavy"> Several books a month</label>
+        </fieldset>
+        <fieldset>
+          <legend>Which would you rather have?</legend>
+          <label class="choice"><input type="radio" name="model" value="pack"> Pay once for a pack of pages</label>
+          <label class="choice"><input type="radio" name="model" value="monthly"> A monthly plan with more pages</label>
+          <label class="choice"><input type="radio" name="model" value="either"> No preference</label>
+        </fieldset>
+        <label class="survey-field" for="surveyComment">What would make premium worth it to you? <span class="optional">(optional)</span></label>
+        <textarea id="surveyComment" class="field" rows="3" maxlength="500"></textarea>
+        <label class="survey-field" for="surveyEmail">Email me when premium launches <span class="optional">(optional, used only for that)</span></label>
+        <input type="email" id="surveyEmail" class="field" autocomplete="email" maxlength="254">
+        <button type="submit" class="transport-wide" id="surveySubmit">Send my answers</button>
+        <p id="surveyStatus" class="survey-status" role="status"></p>
+      </form>
+      <div id="surveyThanks" hidden>
+        <p class="survey-thanks">Thank you. Your answers help set a fair price.</p>
+        <button type="button" class="secondary" id="surveyAgainBtn">Change my answers</button>
+      </div>
+      <button type="button" class="link-button" id="haveKeyBtn">I already have a license key</button>
+    </section>
+
     <div id="licenseBox" style="display:none;">
       <div class="chapter-row">
         <input type="text" id="licenseKeyInput" placeholder="Paste your Readloud license key" class="field">
@@ -481,6 +575,9 @@ const WPS_BASE=2.3; // words per second baseline for duration estimate
 // This is your deployed Worker's base URL from `wrangler deploy` — no
 // trailing slash. The app calls {base}/speak and {base}/redeem-topup.
 const PREMIUM_TTS_BASE='https://readloud-tts-proxy.tayooni2016.workers.dev';
+// Premium is on hold while the pricing survey runs. Set to true to reopen
+// sales: buy links come back and the survey panel stops showing.
+const PREMIUM_SALES_OPEN=false;
 const premiumAudio=new Audio();
 let premiumSegments=[], currentSegmentIdx=0, premiumObjectUrl=null;
 // Caches generated audio per page+segment+voice so switching back to a
@@ -929,7 +1026,7 @@ async function fetchPremiumAudio(text, voiceOverride){
 // anyway when you reach that page, just started earlier.
 let prefetchInFlight=new Set();
 async function prefetchNextPage(){
-  if(qualitySelect.value!=='premium') return;
+  if(!premiumActive()) return;
   const nextPageNum=currentPage+1;
   if(nextPageNum>totalPages) return;
   const voice=premiumVoiceSelect.value;
@@ -1058,15 +1155,23 @@ async function goNextPage(){
     currentPage++;
     await renderPage(currentPage);
     await saveSession();
-    if(qualitySelect.value==='premium') playPremiumFromChunk(0);
+    if(premiumActive()) playPremiumFromChunk(0);
     else speakFromSentence(0);
   } else {
     stopSpeaking();
   }
 }
 
+// Premium playback needs the Premium setting AND an activated license.
+function premiumActive(){ return qualitySelect.value==='premium' && !!licenseKey; }
+
 playBtn.addEventListener('click',()=>{
-  if(qualitySelect.value==='premium'){
+  if(qualitySelect.value==='premium' && !licenseKey && !isPlaying){
+    statusEl.textContent = PREMIUM_SALES_OPEN
+      ? 'Activate a license key to use premium voices. Playing with the free voice for now.'
+      : 'Premium voices are coming soon. Playing with the free voice for now.';
+  }
+  if(premiumActive()){
     if(isPlaying){
       // Pause only — keep the already-generated audio loaded, cost nothing.
       premiumAudio.pause();
@@ -1092,7 +1197,7 @@ playBtn.addEventListener('click',()=>{
 });
 
 restartCurrentPage=()=>{
-  if(qualitySelect.value==='premium') playPremiumFromChunk(0);
+  if(premiumActive()) playPremiumFromChunk(0);
   else speakFromSentence(0);
 };
 
@@ -1159,6 +1264,12 @@ async function refreshBalance(){
   }catch(e){ /* offline: keep showing the last known balance */ }
 }
 
+function hideBuyLinksIfClosed(){
+  if(PREMIUM_SALES_OPEN) return;
+  buyBaseLink.style.display='none';
+  buyTopupLink.style.display='none';
+}
+
 function renderLicenseStatus(){
   if(licenseKey){
     licenseKeyInput.value=licenseKey;
@@ -1167,12 +1278,14 @@ function renderLicenseStatus(){
     topupBox.style.display='flex';
     buyBaseLink.style.display='none';
     buyTopupLink.style.display='';
+    hideBuyLinksIfClosed();
   } else {
     licenseStatus.textContent='Enter your Base Pack license key (from your Gumroad receipt) to activate premium voice.';
     balanceLine.hidden=true;
     topupBox.style.display='none';
     buyBaseLink.style.display='';
     buyTopupLink.style.display='none';
+    hideBuyLinksIfClosed();
   }
 }
 
@@ -1197,7 +1310,8 @@ activateLicenseBtn.addEventListener('click', async ()=>{
     licenseKey=val;
     localStorage.setItem('readloud_license_key', licenseKey);
     transferBtn.style.display='none';
-    renderLicenseStatus();
+    surveyShowKeyEntry=false;
+    updatePremiumPanels();
   }catch(e){
     licenseStatus.textContent=e.message || 'Could not activate that key.';
   }
@@ -1230,13 +1344,20 @@ redeemTopupBtn.addEventListener('click', async ()=>{
 qualitySelect.addEventListener('change',()=>{
   stopSpeaking();
   premiumSegments=[]; currentSegmentIdx=0; // rebuilds cheaply from `sentences`; cache untouched
+  updatePremiumPanels();
+});
+
+function updatePremiumPanels(){
   const premium=qualitySelect.value==='premium';
+  const showSurvey=premium && !licenseKey && !PREMIUM_SALES_OPEN && !surveyShowKeyEntry;
   voiceSelect.style.display=premium?'none':'';
   premiumVoiceSelect.style.display=premium?'':'none';
-  premiumNote.style.display=premium?'flex':'none';
-  licenseBox.style.display=premium?'block':'none';
-  if(premium) renderLicenseStatus();
-});
+  surveyBox.hidden=!showSurvey;
+  premiumNote.style.display=(premium && !showSurvey)?'flex':'none';
+  licenseBox.style.display=(premium && !showSurvey)?'block':'none';
+  if(showSurvey) renderSurveyState();
+  if(premium && !showSurvey) renderLicenseStatus();
+}
 
 prevBtn.addEventListener('click', async ()=>{
   if(currentPage>1){ currentPage--; stopSpeaking(); await renderPage(currentPage); await saveSession(); }
@@ -1250,7 +1371,7 @@ nextBtn.addEventListener('click', async ()=>{
 // seeked mid-utterance). Premium mode: real audio.currentTime — this one
 // is genuinely accurate, not an estimate.
 function seekBy(deltaSeconds){
-  if(qualitySelect.value==='premium'){
+  if(premiumActive()){
     if(!premiumAudio.duration) return;
     premiumAudio.currentTime=Math.max(0, Math.min(premiumAudio.duration, premiumAudio.currentTime+deltaSeconds));
     return;
@@ -1333,6 +1454,106 @@ pruneAudio().catch(()=>{}).finally(refreshAudioUsage);
   if(mq && mq.addEventListener) mq.addEventListener('change', ()=>{ if(current==='auto') apply('auto'); });
 })();
 
+// ---------- Pricing survey ----------
+const surveyBox=document.getElementById('surveyBox'), surveyForm=document.getElementById('surveyForm');
+const surveyStatus=document.getElementById('surveyStatus'), surveySubmit=document.getElementById('surveySubmit');
+const surveyThanks=document.getElementById('surveyThanks');
+let surveyShowKeyEntry=false;
+function surveyDone(){ try{ return localStorage.getItem('readloud_survey_done')==='1'; }catch(e){ return false; } }
+function renderSurveyState(){
+  initSurveyCurrency();
+  const done=surveyDone();
+  surveyForm.hidden=done;
+  surveyThanks.hidden=!done;
+}
+document.getElementById('surveyAgainBtn').addEventListener('click', ()=>{
+  surveyForm.hidden=false; surveyThanks.hidden=true; surveyStatus.textContent='';
+});
+document.getElementById('haveKeyBtn').addEventListener('click', ()=>{
+  surveyShowKeyEntry=true;
+  updatePremiumPanels();
+  licenseKeyInput.focus();
+});
+surveyForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const val=(name)=>{ const el=surveyForm.querySelector('input[name="'+name+'"]:checked'); return el?el.value:''; };
+  const answers={ price:val('price'), reading:val('reading'), model:val('model'),
+    comment:document.getElementById('surveyComment').value, email:document.getElementById('surveyEmail').value.trim() };
+  if(!answers.price || !answers.reading || !answers.model){
+    surveyStatus.textContent='Please answer the three questions first.'; return;
+  }
+  surveySubmit.disabled=true; surveyStatus.textContent='Sending…';
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/survey`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...answers, currency:surveyCurrency, deviceId}),
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||'Could not send your answers. Please try again.');
+    try{ localStorage.setItem('readloud_survey_done','1'); }catch(err){}
+    renderSurveyState();
+  }catch(err){
+    surveyStatus.textContent=err.message || 'Could not send your answers. Please check your connection and try again.';
+  }finally{
+    surveySubmit.disabled=false;
+  }
+});
+
+// Survey prices in naira for visitors in Nigeria (switchable either way).
+// The stored answer is the same bracket either way, so results stay comparable.
+const PRICE_BRACKETS_USD={ lt3:[null,3], '3to6':[3,6], '6to10':[6,10], '10to15':[10,15], gt15:[15,null] };
+let surveyCurrency='USD', ngnPerUsd=1400;
+const currencyNote=document.getElementById('currencyNote');
+function naira(usd){ return '₦'+(Math.round(usd*ngnPerUsd/500)*500).toLocaleString('en'); }
+function renderPriceLabels(){
+  Object.entries(PRICE_BRACKETS_USD).forEach(([id,[lo,hi]])=>{
+    const f=surveyCurrency==='NGN' ? naira : (v)=>'$'+v;
+    const text = lo===null ? 'Under '+f(hi) : hi===null ? 'Over '+f(lo) : f(lo)+' to '+f(hi);
+    surveyForm.querySelector('[data-price-label="'+id+'"]').textContent=text;
+  });
+  surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.currency===surveyCurrency)));
+  currencyNote.hidden = surveyCurrency!=='NGN';
+  currencyNote.textContent = 'Naira amounts are approximate, at about ₦'+ngnPerUsd.toLocaleString('en')+' per dollar. Premium would be charged in dollars.';
+}
+surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.addEventListener('click', ()=>{
+  surveyCurrency=b.dataset.currency;
+  try{ localStorage.setItem('readloud_survey_currency', surveyCurrency); }catch(e){}
+  renderPriceLabels();
+}));
+let geoChecked=false;
+async function initSurveyCurrency(){
+  if(geoChecked) return;
+  geoChecked=true;
+  let saved=null;
+  try{ saved=localStorage.getItem('readloud_survey_currency'); }catch(e){}
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/geo`);
+    const data=await res.json();
+    if(Number.isFinite(data.ngnPerUsd) && data.ngnPerUsd>0) ngnPerUsd=data.ngnPerUsd;
+    if(!saved && data.country==='NG') surveyCurrency='NGN';
+  }catch(e){ /* offline or blocked: dollars, unless they chose naira before */ }
+  if(saved==='NGN' || saved==='USD') surveyCurrency=saved;
+  renderPriceLabels();
+}
+
+// Voice samples: generated once per voice on the server, then free to replay.
+const sampleAudio=new Audio();
+const sampleBtn=document.getElementById('sampleBtn');
+sampleBtn.addEventListener('click', async ()=>{
+  if(!sampleAudio.paused){ sampleAudio.pause(); sampleBtn.textContent='Hear a sample of the selected voice'; return; }
+  stopSpeaking();
+  sampleBtn.textContent='Loading sample…';
+  sampleAudio.src=`${PREMIUM_TTS_BASE}/sample?voice=${encodeURIComponent(premiumVoiceSelect.value)}`;
+  try{
+    await sampleAudio.play();
+    sampleBtn.textContent='Stop sample';
+  }catch(e){
+    sampleBtn.textContent='Sample unavailable right now. Try again later.';
+  }
+});
+sampleAudio.addEventListener('ended', ()=>{ sampleBtn.textContent='Hear a sample of the selected voice'; });
+premiumVoiceSelect.addEventListener('change', ()=>{ if(!sampleAudio.paused){ sampleAudio.pause(); sampleBtn.textContent='Hear a sample of the selected voice'; } });
+
 // ---------- Install help panel ----------
 (function setupInstallHelp(){
   const panel=document.getElementById('installHelp');
@@ -1385,7 +1606,7 @@ fwd10.addEventListener('click',()=>seekBy(10));
 rateSlider.addEventListener('input',()=>{
   rateVal.textContent=parseFloat(rateSlider.value).toFixed(1)+'×';
   premiumAudio.playbackRate=parseFloat(rateSlider.value);
-  if(qualitySelect.value==='premium') return; // real audio rate change is instant, no restart needed
+  if(premiumActive()) return; // real audio rate change is instant, no restart needed
   // recompute duration estimates at new rate, keep same sentence position
   const words=sentences.map(s=>s.split(/\s+/).filter(Boolean).length);
   const rate=parseFloat(rateSlider.value);
