@@ -509,6 +509,7 @@
         <input type="text" id="topupKeyInput" placeholder="Paste a top-up code to add pages" class="field">
         <button class="secondary" id="redeemTopupBtn">Redeem</button>
       </div>
+      <button type="button" class="link-button" id="backToSurveyBtn" hidden>Don't have a key? Back to the survey</button>
     </div>
 
     <div class="row">
@@ -1343,6 +1344,7 @@ redeemTopupBtn.addEventListener('click', async ()=>{
 
 qualitySelect.addEventListener('change',()=>{
   stopSpeaking();
+  if(qualitySelect.value!=='premium') surveyShowKeyEntry=false;
   premiumSegments=[]; currentSegmentIdx=0; // rebuilds cheaply from `sentences`; cache untouched
   updatePremiumPanels();
 });
@@ -1357,6 +1359,7 @@ function updatePremiumPanels(){
   licenseBox.style.display=(premium && !showSurvey)?'block':'none';
   if(showSurvey) renderSurveyState();
   if(premium && !showSurvey) renderLicenseStatus();
+  backToSurveyBtn.hidden = !(premium && !licenseKey && !PREMIUM_SALES_OPEN && surveyShowKeyEntry);
 }
 
 prevBtn.addEventListener('click', async ()=>{
@@ -1468,6 +1471,12 @@ function renderSurveyState(){
 }
 document.getElementById('surveyAgainBtn').addEventListener('click', ()=>{
   surveyForm.hidden=false; surveyThanks.hidden=true; surveyStatus.textContent='';
+});
+const backToSurveyBtn=document.getElementById('backToSurveyBtn');
+backToSurveyBtn.addEventListener('click', ()=>{
+  surveyShowKeyEntry=false;
+  updatePremiumPanels();
+  surveyBox.scrollIntoView({block:'start', behavior:'smooth'});
 });
 document.getElementById('haveKeyBtn').addEventListener('click', ()=>{
   surveyShowKeyEntry=true;
@@ -1617,6 +1626,3 @@ rateSlider.addEventListener('input',()=>{
 </script>
 </body>
 </html>
-
-
-# Don't touch
