@@ -128,7 +128,6 @@
     margin-bottom:18px;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.85rem;
-    display:flex;
     justify-content:space-between;
     align-items:center;
     gap:12px;
@@ -782,6 +781,7 @@ loadVoices();
       resumeNo.onclick=async ()=>{
         resumeBanner.classList.remove('show');
         try{ await idbSet('current',null); }catch(e){}
+        statusEl.textContent='Saved document cleared. Choose a new PDF to begin.';
       };
     }
   }catch(e){ /* IndexedDB unavailable — resume simply won't be offered */ }
