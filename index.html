@@ -344,6 +344,14 @@
     display:block; margin:14px 0 0; padding:0; min-height:44px; border:none; background:none;
     color:var(--pine); text-decoration:underline; text-underline-offset:3px; font-size:0.85rem; cursor:pointer;
   }
+  .currency-switch{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 10px; color:var(--muted); font-size:0.85rem; }
+  .currency-switch button{
+    min-height:36px; padding:0 14px; border:1px solid var(--rule); border-radius:999px;
+    background:transparent; color:var(--ink); font-size:0.85rem; cursor:pointer;
+  }
+  .currency-switch button[aria-pressed="true"]{ background:var(--pine); border-color:var(--pine); color:var(--on-pine); font-weight:600; }
+  .currency-note{ margin:4px 0 0; color:var(--muted); font-size:0.8rem; }
+  .currency-note[hidden]{ display:none; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -454,12 +462,18 @@
       <form id="surveyForm" novalidate>
         <fieldset>
           <legend>What would you pay once for about 100 pages?</legend>
+          <div class="currency-switch" role="group" aria-label="Show prices in">
+            <span>Show prices in</span>
+            <button type="button" data-currency="NGN" aria-pressed="false">₦ Naira</button>
+            <button type="button" data-currency="USD" aria-pressed="true">$ Dollars</button>
+          </div>
           <label class="choice"><input type="radio" name="price" value="free"> Nothing, the free voice is enough</label>
-          <label class="choice"><input type="radio" name="price" value="lt3"> Under $3</label>
-          <label class="choice"><input type="radio" name="price" value="3to6"> $3 to $6</label>
-          <label class="choice"><input type="radio" name="price" value="6to10"> $6 to $10</label>
-          <label class="choice"><input type="radio" name="price" value="10to15"> $10 to $15</label>
-          <label class="choice"><input type="radio" name="price" value="gt15"> Over $15</label>
+          <label class="choice"><input type="radio" name="price" value="lt3"> <span data-price-label="lt3">Under $3</span></label>
+          <label class="choice"><input type="radio" name="price" value="3to6"> <span data-price-label="3to6">$3 to $6</span></label>
+          <label class="choice"><input type="radio" name="price" value="6to10"> <span data-price-label="6to10">$6 to $10</span></label>
+          <label class="choice"><input type="radio" name="price" value="10to15"> <span data-price-label="10to15">$10 to $15</span></label>
+          <label class="choice"><input type="radio" name="price" value="gt15"> <span data-price-label="gt15">Over $15</span></label>
+          <p class="currency-note" id="currencyNote" hidden></p>
         </fieldset>
         <fieldset>
           <legend>How much do you read?</legend>
@@ -483,7 +497,6 @@
       <div id="surveyThanks" hidden>
         <p class="survey-thanks">Thank you. Your answers have been recorded.</p>
       </div>
-      <button type="button" class="link-button" id="haveKeyBtn">I already have a license key</button>
     </section>
 
     <div id="licenseBox" style="display:none;">
@@ -768,7 +781,7 @@ loadVoices();
       };
       resumeNo.onclick=async ()=>{
         resumeBanner.classList.remove('show');
-        try{ await idbSet('current',null); }catch(e){} // forget the saved document so the prompt doesn't come back
+        try{ await idbSet('current',null); }catch(e){}
       };
     }
   }catch(e){ /* IndexedDB unavailable — resume simply won't be offered */ }
@@ -919,7 +932,9 @@ async function renderPage(num){
 }
 
 // ---------- speech playback ----------
+let speakToken=0; // lets a cancelled utterance's late 'end' event be ignored
 function stopSpeaking(){
+  speakToken++;
   speechSynthesis.cancel();
   premiumAudio.pause();
   isPlaying=false;
@@ -956,8 +971,9 @@ function speakFromSentence(idx){
   const vIdx=voiceSelect.value;
   if(voices[vIdx]) u.voice=voices[vIdx];
   u.rate=parseFloat(rateSlider.value);
+  const tok=++speakToken;
   u.onend=()=>{
-    if(!isPlaying) return; // was paused/stopped
+    if(tok!==speakToken || !isPlaying) return; // stale, paused or stopped
     speakFromSentence(idx+1);
   };
   speechSynthesis.speak(u);
@@ -1374,25 +1390,42 @@ nextBtn.addEventListener('click', async ()=>{
 // Standard mode: sentence-granularity estimate (browser TTS can't be
 // seeked mid-utterance). Premium mode: real audio.currentTime — this one
 // is genuinely accurate, not an estimate.
-function seekBy(deltaSeconds){
-  // Premium audio already loaded: real seek, works playing or paused.
+// Which sentence a skip lands on. Always moves at least one sentence, so a
+// long sentence can't swallow the press. Returns -1 or n when it runs off the page.
+function seekTargetIndex(idx, cum, n, delta){
+  const t=Math.max(0,(cum[idx]||0)+delta);
+  let i=cum.findIndex(x=>x>t);
+  i = i===-1 ? n-1 : Math.max(0,i-1);
+  if(delta>0 && i<=idx) i=idx+1;
+  if(delta<0 && i>=idx) i=idx-1;
+  return i;
+}
+let seekBusy=false;
+async function seekBy(deltaSeconds){
   if(premiumActive() && premiumAudio.src && isFinite(premiumAudio.duration) && premiumAudio.duration>0 && loadedAudioVoice===premiumVoiceSelect.value){
     premiumAudio.currentTime=Math.max(0, Math.min(premiumAudio.duration, premiumAudio.currentTime+deltaSeconds));
     return;
   }
-  // Otherwise (free voice, or premium not generated yet): move by sentence estimate.
-  // Works whether or not it is playing; Play then starts from the new spot.
-  if(sentences.length===0) return;
-  const currentTime=(sentenceCum[currentSentenceIdx]||0);
-  const targetTime=Math.max(0, currentTime+deltaSeconds);
-  let targetIdx=sentenceCum.findIndex(t=>t>targetTime);
-  if(targetIdx===-1) targetIdx=sentences.length-1; else targetIdx=Math.max(0,targetIdx-1);
-  if(isPlaying && !premiumActive()) speakFromSentence(targetIdx);
-  else { currentSentenceIdx=targetIdx; highlightSentence(targetIdx); }
+  if(sentences.length===0 || seekBusy) return;
+  let i=seekTargetIndex(currentSentenceIdx, sentenceCum, sentences.length, deltaSeconds);
+  const wasPlaying=isPlaying && !premiumActive();
+  if(i>=sentences.length || i<0){
+    const forward=i>=sentences.length;
+    if(forward ? currentPage>=totalPages : currentPage<=1) return;
+    seekBusy=true;
+    try{
+      currentPage += forward ? 1 : -1;
+      stopSpeaking();
+      await renderPage(currentPage);
+      await saveSession();
+    } finally { seekBusy=false; }
+    i = forward ? 0 : sentences.length-1;
+  }
+  if(wasPlaying) speakFromSentence(i);
+  else { currentSentenceIdx=i; highlightSentence(i); }
 }
 // ---------- sleep timer ----------
-// Counts down only while audio is actually playing; pausing freezes it,
-// playing again continues from where it stopped.
+// Counts down only while audio is actually playing; pausing freezes it.
 function listening(){ return isPlaying && (!premiumActive() || !premiumAudio.paused); }
 function fmtSleep(sec){
   const s=Math.ceil(sec);
@@ -1477,22 +1510,17 @@ const surveyThanks=document.getElementById('surveyThanks');
 let surveyShowKeyEntry=false;
 function surveyDone(){ try{ return localStorage.getItem('readloud_survey_done')==='1'; }catch(e){ return false; } }
 function renderSurveyState(){
+  initSurveyCurrency();
   const done=surveyDone();
   surveyForm.hidden=done;
   surveyThanks.hidden=!done;
   document.getElementById('surveyLead').textContent = done ? 'Premium will include:' : 'Help set a fair price. Premium will include:';
-  document.getElementById('haveKeyBtn').hidden = done;
 }
 const backToSurveyBtn=document.getElementById('backToSurveyBtn');
 backToSurveyBtn.addEventListener('click', ()=>{
   surveyShowKeyEntry=false;
   updatePremiumPanels();
   surveyBox.scrollIntoView({block:'start', behavior:'smooth'});
-});
-document.getElementById('haveKeyBtn').addEventListener('click', ()=>{
-  surveyShowKeyEntry=true;
-  updatePremiumPanels();
-  licenseKeyInput.focus();
 });
 surveyForm.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -1506,10 +1534,10 @@ surveyForm.addEventListener('submit', async (e)=>{
   try{
     const res=await fetch(`${PREMIUM_TTS_BASE}/survey`,{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({...answers, deviceId}),
+      body:JSON.stringify({...answers, currency:surveyCurrency, deviceId}),
     });
     const data=await res.json().catch(()=>({}));
-    if(res.status===409){ // answers already on file for this device
+    if(res.status===409){
       try{ localStorage.setItem('readloud_survey_done','1'); }catch(err){}
       renderSurveyState(); return;
     }
@@ -1522,6 +1550,43 @@ surveyForm.addEventListener('submit', async (e)=>{
     surveySubmit.disabled=false;
   }
 });
+
+// Survey prices in naira for visitors in Nigeria (switchable either way).
+// The stored answer is the same bracket either way, so results stay comparable.
+const PRICE_BRACKETS_USD={ lt3:[null,3], '3to6':[3,6], '6to10':[6,10], '10to15':[10,15], gt15:[15,null] };
+let surveyCurrency='USD', ngnPerUsd=1400;
+const currencyNote=document.getElementById('currencyNote');
+function naira(usd){ return '₦'+(Math.round(usd*ngnPerUsd/500)*500).toLocaleString('en'); }
+function renderPriceLabels(){
+  Object.entries(PRICE_BRACKETS_USD).forEach(([id,[lo,hi]])=>{
+    const f=surveyCurrency==='NGN' ? naira : (v)=>'$'+v;
+    const text = lo===null ? 'Under '+f(hi) : hi===null ? 'Over '+f(lo) : f(lo)+' to '+f(hi);
+    surveyForm.querySelector('[data-price-label="'+id+'"]').textContent=text;
+  });
+  surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.currency===surveyCurrency)));
+  currencyNote.hidden = surveyCurrency!=='NGN';
+  currencyNote.textContent = 'Naira amounts are approximate, at about ₦'+ngnPerUsd.toLocaleString('en')+' per dollar. Premium would be charged in dollars.';
+}
+surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.addEventListener('click', ()=>{
+  surveyCurrency=b.dataset.currency;
+  try{ localStorage.setItem('readloud_survey_currency', surveyCurrency); }catch(e){}
+  renderPriceLabels();
+}));
+let geoChecked=false;
+async function initSurveyCurrency(){
+  if(geoChecked) return;
+  geoChecked=true;
+  let saved=null;
+  try{ saved=localStorage.getItem('readloud_survey_currency'); }catch(e){}
+  try{
+    const res=await fetch(`${PREMIUM_TTS_BASE}/geo`);
+    const data=await res.json();
+    if(Number.isFinite(data.ngnPerUsd) && data.ngnPerUsd>0) ngnPerUsd=data.ngnPerUsd;
+    if(!saved && data.country==='NG') surveyCurrency='NGN';
+  }catch(e){ /* offline or blocked: dollars, unless they chose naira before */ }
+  if(saved==='NGN' || saved==='USD') surveyCurrency=saved;
+  renderPriceLabels();
+}
 
 // Voice samples: generated once per voice on the server, then free to replay.
 const sampleAudio=new Audio();
@@ -1590,16 +1655,15 @@ fwd5.addEventListener('click',()=>seekBy(5));
 fwd10.addEventListener('click',()=>seekBy(10));
 
 // ---------- speed ----------
-const RATE_STEPS=[0.5,1,1.5,2];
+const RATE_STEPS=[0.75,1,1.25,1.5]; // moderate speeds a person can actually follow
 const rateMinus=document.getElementById('rateMinus'), ratePlus=document.getElementById('ratePlus');
 function applyRate(){
   const rate=parseFloat(rateSlider.value);
-  rateVal.textContent=rate.toFixed(1)+'×';
+  rateVal.textContent=rate.toFixed(2).replace(/0$/,'')+'×';
   rateMinus.disabled=rate<=RATE_STEPS[0];
   ratePlus.disabled=rate>=RATE_STEPS[RATE_STEPS.length-1];
   premiumAudio.playbackRate=rate;
-  if(premiumActive()) return; // real audio rate change is instant, no restart needed
-  // recompute duration estimates at new rate, keep same sentence position
+  if(premiumActive()) return;
   const words=sentences.map(s=>s.split(/\s+/).filter(Boolean).length);
   sentenceDurations=words.map(w=>Math.max(w/(WPS_BASE*rate),0.3));
   sentenceCum=[]; let acc=0; sentenceDurations.forEach(d=>{sentenceCum.push(acc); acc+=d;});
