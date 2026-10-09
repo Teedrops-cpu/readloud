@@ -120,7 +120,7 @@
   main{width:100%;max-width:640px;padding:24px 20px 80px;flex:1;}
 
   #resumeBanner{
-    display:none;
+    display:flex;
     background:var(--pine-soft);
     border:1px solid var(--pine);
     border-radius:6px;
@@ -139,6 +139,7 @@
   }
   #resumeYes{background:var(--pine);color:var(--on-pine);}
   #resumeNo{background:transparent;color:var(--muted);}
+  #resumeBanner button:disabled{opacity:.4;cursor:default;}
 
   #dropzone{
     border:1.5px dashed var(--rule);
@@ -767,24 +768,44 @@ function loadVoices(){
 speechSynthesis.onvoiceschanged=loadVoices;
 loadVoices();
 
-// ---------- resume check on load ----------
+// ---------- resume / start fresh ----------
+// Always visible, but only clickable when there is a document to act on.
+let savedDoc=null; // last saved PDF from a previous visit
+function renderBanner(){
+  if(fileMeta){
+    resumeText.textContent=`Reading "${fileMeta.name}"`;
+    resumeYes.disabled=true; resumeNo.disabled=false;
+  } else if(savedDoc){
+    resumeText.textContent=`Continue "${savedDoc.name}" — you were on page ${savedDoc.page}?`;
+    resumeYes.disabled=false; resumeNo.disabled=false;
+  } else {
+    resumeText.textContent='No document yet. Upload a PDF to begin.';
+    resumeYes.disabled=true; resumeNo.disabled=true;
+  }
+}
+resumeYes.onclick=async ()=>{
+  if(!savedDoc || fileMeta) return;
+  await openFromBuffer(savedDoc.buf, savedDoc.name, savedDoc.size, savedDoc.chapters||[], savedDoc.page||1);
+};
+resumeNo.onclick=async ()=>{
+  // Close the current document, forget the saved copy, return to the upload screen.
+  stopSpeaking(); clearSleepTimer(); sleepSelect.value='0'; resetPremiumForPage();
+  try{ await idbSet('current',null); }catch(e){}
+  fileMeta=null; pdfDoc=null; savedDoc=null; chapters=[];
+  totalPages=0; currentPage=1; sentences=[]; sentenceDurations=[]; sentenceCum=[]; currentSentenceIdx=0;
+  textview.innerHTML=''; docName.textContent=''; pageInfo.textContent='';
+  document.getElementById('pageFooter').textContent='';
+  reader.classList.remove('active');
+  fileInput.value='';
+  statusEl.textContent='Document cleared. Choose a new PDF to begin.';
+  renderBanner();
+};
+renderBanner();
 (async ()=>{
   try{
     const saved=await idbGet('current');
-    if(saved && saved.buf){
-      resumeText.textContent=`Continue "${saved.name}" — you were on page ${saved.page}?`;
-      resumeBanner.classList.add('show');
-      resumeYes.onclick=async ()=>{
-        resumeBanner.classList.remove('show');
-        await openFromBuffer(saved.buf, saved.name, saved.size, saved.chapters||[], saved.page||1);
-      };
-      resumeNo.onclick=async ()=>{
-        resumeBanner.classList.remove('show');
-        try{ await idbSet('current',null); }catch(e){}
-        statusEl.textContent='Saved document cleared. Choose a new PDF to begin.';
-      };
-    }
-  }catch(e){ /* IndexedDB unavailable — resume simply won't be offered */ }
+    if(saved && saved.buf){ savedDoc=saved; renderBanner(); }
+  }catch(e){ /* IndexedDB unavailable: resume simply won't be offered */ }
 })();
 
 // ---------- file handling ----------
@@ -824,6 +845,7 @@ async function openFromBuffer(buf, name, size, existingChapters, startPage){
 
   await renderPage(currentPage);
   await saveSession();
+  renderBanner();
 }
 
 async function resolveOutline(items, acc=[]){
