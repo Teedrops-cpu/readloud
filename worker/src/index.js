@@ -18,7 +18,7 @@ function corsHeaders(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim());
   return {
     'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0] || '',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Expose-Headers': 'X-Chars-Remaining',
     'Vary': 'Origin',
@@ -350,7 +350,11 @@ async function handleSurvey(request, env, cors) {
     return json({ error: 'That email address doesn\'t look right. Leave it empty if you prefer.' }, 400, cors);
   }
   const comment = typeof body.comment === 'string' ? body.comment.trim().slice(0, 500) : '';
-  const currency = body.currency === 'NGN' ? 'NGN' : 'USD'; // which prices they were shown
+
+  // One set of answers per device: no changing them afterwards.
+  if (await env.LICENSES.get(`survey:${deviceId}`)) {
+    return json({ error: 'Your answers are already recorded. Thank you.' }, 409, cors);
+  }
 
   // Daily rate limit per IP (hashed, expires after two days).
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -364,17 +368,9 @@ async function handleSurvey(request, env, cors) {
 
   const country = (request.cf && request.cf.country) || 'XX';
   await env.LICENSES.put(`survey:${deviceId}`, JSON.stringify({
-    price, reading, model, email, comment, country, currency, at: new Date().toISOString(),
+    price, reading, model, email, comment, country, at: new Date().toISOString(),
   }));
   return json({ ok: true }, 200, cors);
-}
-
-// Tells the app the visitor's country and the naira rate used for survey
-// prices. Change NGN_PER_USD in wrangler.toml and redeploy when the rate moves.
-function handleGeo(request, env, cors) {
-  const country = (request.cf && request.cf.country) || 'XX';
-  const ngnPerUsd = Number(env.NGN_PER_USD || 1400);
-  return json({ country, ngnPerUsd }, 200, { ...cors, 'Cache-Control': 'no-store' });
 }
 
 // One fixed sample per voice, generated once, then served from storage.
@@ -447,8 +443,8 @@ async function handleSurveyResults(request, env) {
   const answers = await loadSurveyAnswers(env);
 
   if (url.searchParams.get('format') === 'csv') {
-    const rows = [['date', 'country', 'shown_prices_in', 'would_pay', 'reads', 'prefers', 'email', 'comment']]
-      .concat(answers.map(a => [a.at, a.country, a.currency || 'USD', SURVEY_LABELS.price[a.price], SURVEY_LABELS.reading[a.reading], SURVEY_LABELS.model[a.model], a.email, a.comment]));
+    const rows = [['date', 'country', 'would_pay', 'reads', 'prefers', 'email', 'comment']]
+      .concat(answers.map(a => [a.at, a.country, SURVEY_LABELS.price[a.price], SURVEY_LABELS.reading[a.reading], SURVEY_LABELS.model[a.model], a.email, a.comment]));
     return new Response(rows.map(r => r.map(csvCell).join(',')).join('\n'), {
       status: 200, headers: { ...privateHeaders, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="readloud-survey.csv"' },
     });
@@ -477,7 +473,6 @@ async function handleSurveyResults(request, env) {
   }).join('');
   const people = answers.filter(a => a.email || a.comment).map(a =>
     `<tr><td>${escapeHtml(a.at.slice(0, 10))}</td><td>${escapeHtml(a.country)}</td><td>${escapeHtml(SURVEY_LABELS.price[a.price])}</td><td>${escapeHtml(a.email)}</td><td>${escapeHtml(a.comment)}</td></tr>`).join('');
-  const inNaira = answers.filter(a => a.currency === 'NGN').length;
   const csvHref = `?key=${encodeURIComponent(url.searchParams.get('key'))}&format=csv`;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Readloud survey results</title>
@@ -493,7 +488,7 @@ td.num{text-align:right;white-space:nowrap}td.bar{width:40%}td.bar span{display:
 .muted,small{color:var(--muted)}a{color:var(--accent)}.wide{overflow-x:auto}
 </style></head><body><main>
 <h1>Readloud pricing survey</h1>
-<p class="muted">${answers.length} response${answers.length === 1 ? '' : 's'}${answers.length < 30 ? '. Wait for about 30 before trusting the pattern.' : '.'} ${inNaira} answered with naira prices (same brackets, converted at ₦${Number(env.NGN_PER_USD || 1400).toLocaleString('en')} per dollar). <a href="${csvHref}">Download CSV</a></p>
+<p class="muted">${answers.length} response${answers.length === 1 ? '' : 's'}${answers.length < 30 ? '. Wait for about 30 before trusting the pattern.' : '.'} <a href="${csvHref}">Download CSV</a></p>
 <h2>What people would pay once, for about 100 pages</h2><div class="card">${bars(answers, 'price')}</div>
 <h2>Nigeria vs everywhere else</h2><div class="grid">
 <div class="card"><h3>Nigeria <small>(${ng.length})</small></h3>${ng.length ? bars(ng, 'price') : '<p class="muted">No answers yet.</p>'}</div>
@@ -514,7 +509,6 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'GET') {
       if (url.pathname === '/sample') return handleSample(request, env);
-      if (url.pathname === '/geo') return handleGeo(request, env, cors);
       if (url.pathname === '/survey-results') return handleSurveyResults(request, env);
     }
     if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405, cors);

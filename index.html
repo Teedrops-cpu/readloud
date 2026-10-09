@@ -232,6 +232,13 @@
   }
   .rate-label{white-space:nowrap;display:flex;align-items:center;gap:6px;}
 
+  .rate-stepper{display:inline-flex;align-items:center;gap:8px;}
+  .rate-stepper button{width:40px;height:40px;border-radius:50%;border:1px solid var(--rule);background:var(--surface);color:var(--ink);font-size:1.2rem;line-height:1;cursor:pointer;}
+  .rate-stepper button:hover:not(:disabled){border-color:var(--pine);color:var(--pine);}
+  .rate-stepper button:disabled{opacity:.4;cursor:default;}
+  #rateVal{min-width:3.2em;text-align:center;font-variant-numeric:tabular-nums;}
+  .page-footer{text-align:center;color:var(--muted);font-size:0.8rem;margin:6px 0 0;}
+
   .buy-links{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.8rem; margin:0 0 14px;
@@ -337,14 +344,6 @@
     display:block; margin:14px 0 0; padding:0; min-height:44px; border:none; background:none;
     color:var(--pine); text-decoration:underline; text-underline-offset:3px; font-size:0.85rem; cursor:pointer;
   }
-  .currency-switch{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 10px; color:var(--muted); font-size:0.85rem; }
-  .currency-switch button{
-    min-height:36px; padding:0 14px; border:1px solid var(--rule); border-radius:999px;
-    background:transparent; color:var(--ink); font-size:0.85rem; cursor:pointer;
-  }
-  .currency-switch button[aria-pressed="true"]{ background:var(--pine); border-color:var(--pine); color:var(--on-pine); font-weight:600; }
-  .currency-note{ margin:4px 0 0; color:var(--muted); font-size:0.8rem; }
-  .currency-note[hidden]{ display:none; }
   footer{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     font-size:0.7rem;color:var(--muted);padding:16px;text-align:center;
@@ -394,6 +393,7 @@
     </div>
 
     <div id="textview"></div>
+    <div class="page-footer" id="pageFooter" aria-live="polite"></div>
 
     <div class="controls">
       <button class="seek" id="back10" title="Back 10s">◀◀<br>10s</button>
@@ -408,10 +408,14 @@
     </div>
 
     <div class="row">
-      <label class="rate-label">Speed
-        <input type="range" id="rateSlider" min="0.5" max="2" step="0.1" value="1">
-        <span id="rateVal">1.0×</span>
-      </label>
+      <div class="rate-label"><span>Speed</span>
+        <span class="rate-stepper">
+          <button type="button" id="rateMinus" aria-label="Slower">−</button>
+          <span id="rateVal">1.0×</span>
+          <button type="button" id="ratePlus" aria-label="Faster">+</button>
+        </span>
+        <input type="hidden" id="rateSlider" value="1">
+      </div>
       <select id="voiceSelect"></select>
     </div>
 
@@ -437,7 +441,7 @@
 
     <section id="surveyBox" class="survey" hidden aria-labelledby="surveyTitle">
       <h2 id="surveyTitle">Premium voices are coming soon</h2>
-      <p class="survey-lead">Help set a fair price. Premium will include:</p>
+      <p class="survey-lead" id="surveyLead">Help set a fair price. Premium will include:</p>
       <ul class="survey-perks">
         <li>Six natural, human-sounding voices</li>
         <li>About 100 pages, or 4 to 5 hours of listening</li>
@@ -450,18 +454,12 @@
       <form id="surveyForm" novalidate>
         <fieldset>
           <legend>What would you pay once for about 100 pages?</legend>
-          <div class="currency-switch" role="group" aria-label="Show prices in">
-            <span>Show prices in</span>
-            <button type="button" data-currency="NGN" aria-pressed="false">₦ Naira</button>
-            <button type="button" data-currency="USD" aria-pressed="true">$ Dollars</button>
-          </div>
           <label class="choice"><input type="radio" name="price" value="free"> Nothing, the free voice is enough</label>
-          <label class="choice"><input type="radio" name="price" value="lt3"> <span data-price-label="lt3">Under $3</span></label>
-          <label class="choice"><input type="radio" name="price" value="3to6"> <span data-price-label="3to6">$3 to $6</span></label>
-          <label class="choice"><input type="radio" name="price" value="6to10"> <span data-price-label="6to10">$6 to $10</span></label>
-          <label class="choice"><input type="radio" name="price" value="10to15"> <span data-price-label="10to15">$10 to $15</span></label>
-          <label class="choice"><input type="radio" name="price" value="gt15"> <span data-price-label="gt15">Over $15</span></label>
-          <p class="currency-note" id="currencyNote" hidden></p>
+          <label class="choice"><input type="radio" name="price" value="lt3"> Under $3</label>
+          <label class="choice"><input type="radio" name="price" value="3to6"> $3 to $6</label>
+          <label class="choice"><input type="radio" name="price" value="6to10"> $6 to $10</label>
+          <label class="choice"><input type="radio" name="price" value="10to15"> $10 to $15</label>
+          <label class="choice"><input type="radio" name="price" value="gt15"> Over $15</label>
         </fieldset>
         <fieldset>
           <legend>How much do you read?</legend>
@@ -483,8 +481,7 @@
         <p id="surveyStatus" class="survey-status" role="status"></p>
       </form>
       <div id="surveyThanks" hidden>
-        <p class="survey-thanks">Thank you. Your answers help set a fair price.</p>
-        <button type="button" class="secondary" id="surveyAgainBtn">Change my answers</button>
+        <p class="survey-thanks">Thank you. Your answers have been recorded.</p>
       </div>
       <button type="button" class="link-button" id="haveKeyBtn">I already have a license key</button>
     </section>
@@ -569,7 +566,7 @@ let currentSentenceIdx=0;
 let isPlaying=false, voices=[];
 let fileMeta=null; // {name,size}
 let chapters=[]; // {title,page,source}
-let sleepTimeoutId=null, sleepIntervalId=null, sleepEndsAt=null;
+let sleepRemaining=0, sleepTickId=null, sleepLastTick=0; // seconds of LISTENING left
 const WPS_BASE=2.3; // words per second baseline for duration estimate
 
 // ---- Premium (paid) voice config ----
@@ -769,7 +766,10 @@ loadVoices();
         resumeBanner.classList.remove('show');
         await openFromBuffer(saved.buf, saved.name, saved.size, saved.chapters||[], saved.page||1);
       };
-      resumeNo.onclick=()=>resumeBanner.classList.remove('show');
+      resumeNo.onclick=async ()=>{
+        resumeBanner.classList.remove('show');
+        try{ await idbSet('current',null); }catch(e){} // forget the saved document so the prompt doesn't come back
+      };
     }
   }catch(e){ /* IndexedDB unavailable — resume simply won't be offered */ }
 })();
@@ -912,6 +912,7 @@ async function renderPage(num){
 
   textview.innerHTML=sentences.map((s,i)=>`<span class="sent" id="s${i}">${s.replace(/</g,'&lt;')}</span>`).join(' ');
   pageInfo.textContent=`Page ${num} of ${totalPages}`;
+  document.getElementById('pageFooter').textContent=`Page ${num} of ${totalPages}`;
   prevBtn.disabled=num<=1; nextBtn.disabled=num>=totalPages;
   textview.scrollTop=0;
   currentSentenceIdx=0;
@@ -1374,44 +1375,56 @@ nextBtn.addEventListener('click', async ()=>{
 // seeked mid-utterance). Premium mode: real audio.currentTime — this one
 // is genuinely accurate, not an estimate.
 function seekBy(deltaSeconds){
-  if(premiumActive()){
-    if(!premiumAudio.duration) return;
+  // Premium audio already loaded: real seek, works playing or paused.
+  if(premiumActive() && premiumAudio.src && isFinite(premiumAudio.duration) && premiumAudio.duration>0 && loadedAudioVoice===premiumVoiceSelect.value){
     premiumAudio.currentTime=Math.max(0, Math.min(premiumAudio.duration, premiumAudio.currentTime+deltaSeconds));
     return;
   }
+  // Otherwise (free voice, or premium not generated yet): move by sentence estimate.
+  // Works whether or not it is playing; Play then starts from the new spot.
   if(sentences.length===0) return;
   const currentTime=(sentenceCum[currentSentenceIdx]||0);
   const targetTime=Math.max(0, currentTime+deltaSeconds);
   let targetIdx=sentenceCum.findIndex(t=>t>targetTime);
   if(targetIdx===-1) targetIdx=sentences.length-1; else targetIdx=Math.max(0,targetIdx-1);
-  const wasPlaying=isPlaying;
-  if(wasPlaying) speakFromSentence(targetIdx);
+  if(isPlaying && !premiumActive()) speakFromSentence(targetIdx);
   else { currentSentenceIdx=targetIdx; highlightSentence(targetIdx); }
 }
 // ---------- sleep timer ----------
+// Counts down only while audio is actually playing; pausing freezes it,
+// playing again continues from where it stopped.
+function listening(){ return isPlaying && (!premiumActive() || !premiumAudio.paused); }
+function fmtSleep(sec){
+  const s=Math.ceil(sec);
+  return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+}
+function renderSleep(){
+  sleepCountdown.textContent = listening() ? `stops in ${fmtSleep(sleepRemaining)}` : `paused at ${fmtSleep(sleepRemaining)}`;
+}
 function clearSleepTimer(){
-  if(sleepTimeoutId){ clearTimeout(sleepTimeoutId); sleepTimeoutId=null; }
-  if(sleepIntervalId){ clearInterval(sleepIntervalId); sleepIntervalId=null; }
-  sleepEndsAt=null;
+  if(sleepTickId){ clearInterval(sleepTickId); sleepTickId=null; }
+  sleepRemaining=0;
   sleepCountdown.textContent='';
 }
-function setSleepTimer(minutes){
-  clearSleepTimer();
-  if(!minutes) return;
-  sleepEndsAt=Date.now()+minutes*60*1000;
-  sleepTimeoutId=setTimeout(()=>{
+function sleepTick(){
+  const now=Date.now(), dt=(now-sleepLastTick)/1000;
+  sleepLastTick=now;
+  if(listening()) sleepRemaining=Math.max(0, sleepRemaining-dt);
+  if(sleepRemaining<=0){
     stopSpeaking();
     clearSleepTimer();
     sleepSelect.value='0';
     statusEl.textContent='Sleep timer ended playback.';
-  }, minutes*60*1000);
-  sleepIntervalId=setInterval(()=>{
-    if(!sleepEndsAt) return;
-    const remaining=Math.max(0, Math.round((sleepEndsAt-Date.now())/1000));
-    const m=String(Math.floor(remaining/60)).padStart(2,'0');
-    const s=String(remaining%60).padStart(2,'0');
-    sleepCountdown.textContent=`stops in ${m}:${s}`;
-  }, 1000);
+    return;
+  }
+  renderSleep();
+}
+function setSleepTimer(minutes){
+  clearSleepTimer();
+  if(!minutes) return;
+  sleepRemaining=minutes*60; sleepLastTick=Date.now();
+  sleepTickId=setInterval(sleepTick,1000);
+  renderSleep();
 }
 sleepSelect.addEventListener('change',()=>setSleepTimer(parseInt(sleepSelect.value,10)));
 
@@ -1464,14 +1477,12 @@ const surveyThanks=document.getElementById('surveyThanks');
 let surveyShowKeyEntry=false;
 function surveyDone(){ try{ return localStorage.getItem('readloud_survey_done')==='1'; }catch(e){ return false; } }
 function renderSurveyState(){
-  initSurveyCurrency();
   const done=surveyDone();
   surveyForm.hidden=done;
   surveyThanks.hidden=!done;
+  document.getElementById('surveyLead').textContent = done ? 'Premium will include:' : 'Help set a fair price. Premium will include:';
+  document.getElementById('haveKeyBtn').hidden = done;
 }
-document.getElementById('surveyAgainBtn').addEventListener('click', ()=>{
-  surveyForm.hidden=false; surveyThanks.hidden=true; surveyStatus.textContent='';
-});
 const backToSurveyBtn=document.getElementById('backToSurveyBtn');
 backToSurveyBtn.addEventListener('click', ()=>{
   surveyShowKeyEntry=false;
@@ -1495,9 +1506,13 @@ surveyForm.addEventListener('submit', async (e)=>{
   try{
     const res=await fetch(`${PREMIUM_TTS_BASE}/survey`,{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({...answers, currency:surveyCurrency, deviceId}),
+      body:JSON.stringify({...answers, deviceId}),
     });
     const data=await res.json().catch(()=>({}));
+    if(res.status===409){ // answers already on file for this device
+      try{ localStorage.setItem('readloud_survey_done','1'); }catch(err){}
+      renderSurveyState(); return;
+    }
     if(!res.ok) throw new Error(data.error||'Could not send your answers. Please try again.');
     try{ localStorage.setItem('readloud_survey_done','1'); }catch(err){}
     renderSurveyState();
@@ -1507,43 +1522,6 @@ surveyForm.addEventListener('submit', async (e)=>{
     surveySubmit.disabled=false;
   }
 });
-
-// Survey prices in naira for visitors in Nigeria (switchable either way).
-// The stored answer is the same bracket either way, so results stay comparable.
-const PRICE_BRACKETS_USD={ lt3:[null,3], '3to6':[3,6], '6to10':[6,10], '10to15':[10,15], gt15:[15,null] };
-let surveyCurrency='USD', ngnPerUsd=1400;
-const currencyNote=document.getElementById('currencyNote');
-function naira(usd){ return '₦'+(Math.round(usd*ngnPerUsd/500)*500).toLocaleString('en'); }
-function renderPriceLabels(){
-  Object.entries(PRICE_BRACKETS_USD).forEach(([id,[lo,hi]])=>{
-    const f=surveyCurrency==='NGN' ? naira : (v)=>'$'+v;
-    const text = lo===null ? 'Under '+f(hi) : hi===null ? 'Over '+f(lo) : f(lo)+' to '+f(hi);
-    surveyForm.querySelector('[data-price-label="'+id+'"]').textContent=text;
-  });
-  surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.currency===surveyCurrency)));
-  currencyNote.hidden = surveyCurrency!=='NGN';
-  currencyNote.textContent = 'Naira amounts are approximate, at about ₦'+ngnPerUsd.toLocaleString('en')+' per dollar. Premium would be charged in dollars.';
-}
-surveyForm.querySelectorAll('[data-currency]').forEach(b=>b.addEventListener('click', ()=>{
-  surveyCurrency=b.dataset.currency;
-  try{ localStorage.setItem('readloud_survey_currency', surveyCurrency); }catch(e){}
-  renderPriceLabels();
-}));
-let geoChecked=false;
-async function initSurveyCurrency(){
-  if(geoChecked) return;
-  geoChecked=true;
-  let saved=null;
-  try{ saved=localStorage.getItem('readloud_survey_currency'); }catch(e){}
-  try{
-    const res=await fetch(`${PREMIUM_TTS_BASE}/geo`);
-    const data=await res.json();
-    if(Number.isFinite(data.ngnPerUsd) && data.ngnPerUsd>0) ngnPerUsd=data.ngnPerUsd;
-    if(!saved && data.country==='NG') surveyCurrency='NGN';
-  }catch(e){ /* offline or blocked: dollars, unless they chose naira before */ }
-  if(saved==='NGN' || saved==='USD') surveyCurrency=saved;
-  renderPriceLabels();
-}
 
 // Voice samples: generated once per voice on the server, then free to replay.
 const sampleAudio=new Audio();
@@ -1612,17 +1590,29 @@ fwd5.addEventListener('click',()=>seekBy(5));
 fwd10.addEventListener('click',()=>seekBy(10));
 
 // ---------- speed ----------
-rateSlider.addEventListener('input',()=>{
-  rateVal.textContent=parseFloat(rateSlider.value).toFixed(1)+'×';
-  premiumAudio.playbackRate=parseFloat(rateSlider.value);
+const RATE_STEPS=[0.5,1,1.5,2];
+const rateMinus=document.getElementById('rateMinus'), ratePlus=document.getElementById('ratePlus');
+function applyRate(){
+  const rate=parseFloat(rateSlider.value);
+  rateVal.textContent=rate.toFixed(1)+'×';
+  rateMinus.disabled=rate<=RATE_STEPS[0];
+  ratePlus.disabled=rate>=RATE_STEPS[RATE_STEPS.length-1];
+  premiumAudio.playbackRate=rate;
   if(premiumActive()) return; // real audio rate change is instant, no restart needed
   // recompute duration estimates at new rate, keep same sentence position
   const words=sentences.map(s=>s.split(/\s+/).filter(Boolean).length);
-  const rate=parseFloat(rateSlider.value);
   sentenceDurations=words.map(w=>Math.max(w/(WPS_BASE*rate),0.3));
   sentenceCum=[]; let acc=0; sentenceDurations.forEach(d=>{sentenceCum.push(acc); acc+=d;});
   if(isPlaying) speakFromSentence(currentSentenceIdx);
-});
+}
+function stepRate(dir){
+  const i=Math.max(0,RATE_STEPS.indexOf(parseFloat(rateSlider.value)));
+  rateSlider.value=String(RATE_STEPS[Math.min(Math.max(i+dir,0),RATE_STEPS.length-1)]);
+  applyRate();
+}
+rateMinus.addEventListener('click',()=>stepRate(-1));
+ratePlus.addEventListener('click',()=>stepRate(1));
+applyRate();
 </script>
 </body>
 </html>

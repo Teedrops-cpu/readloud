@@ -1,7 +1,7 @@
 // Bump this only if you ever need to force a full cache wipe (e.g. after
 // changing which files are precached). Normal content updates don't need
 // a bump anymore — see the network-first strategy below.
-const CACHE_NAME = 'readloud-shell-v2';
+const CACHE_NAME = 'readloud-shell-v3';
 
 const APP_SHELL = [
   './',
